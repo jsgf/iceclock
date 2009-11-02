@@ -582,18 +582,6 @@ static unsigned char show_num(unsigned char pos, unsigned char *v)
   return 2;
 }
 
-static unsigned char show_dash(unsigned char pos, unsigned char *v)
-{
-  display[pos] = 0x2;		/* dash */
-  return 1;
-}
-
-static unsigned char show_space(unsigned char pos, unsigned char *v)
-{
-  display[pos] = 0x0;
-  return 1;
-}
-
 static unsigned char show_str(unsigned char pos, unsigned char *v)
 {
   char *c = (char *)v;
@@ -688,31 +676,31 @@ static struct menu_state {
 
 static const struct field alarm_fields[] PROGMEM = {
   { show_num, update_hour, &menu_state.time.h },
-  { show_dash, NULL },
+  { show_str, NULL, (unsigned char *)"-" },
   { show_num, update_mod60, &menu_state.time.m },
 };
 
 static const struct field time_fields[] PROGMEM = {
   { show_num, update_hour, &menu_state.time.h },
-  { show_space, NULL },
+  { show_str, NULL, (unsigned char *)" " },
   { show_num, update_mod60, &menu_state.time.m },
-  { show_space, NULL },
+  { show_str, NULL, (unsigned char *)" " },
   { show_num, update_mod60, &menu_state.time.s },
 };
 
 static const struct field us_date_fields[] PROGMEM = {
   { show_num, update_month, &menu_state.date.m },
-  { show_dash, NULL },
+  { show_str, NULL, (unsigned char *)"-" },
   { show_num, update_day, &menu_state.date.d },
-  { show_dash, NULL },
+  { show_str, NULL, (unsigned char *)"-" },
   { show_num, update_year, &menu_state.date.y },
 };
 
 static const struct field euro_date_fields[] PROGMEM = {
   { show_num, update_day, &menu_state.date.d },
-  { show_dash, NULL },
+  { show_str, NULL, (unsigned char *)"-" },
   { show_num, update_month, &menu_state.date.m },
-  { show_dash, NULL },
+  { show_str, NULL, (unsigned char *)"-" },
   { show_num, update_year, &menu_state.date.y },
 };
 
