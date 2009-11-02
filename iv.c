@@ -1403,12 +1403,12 @@ void display_date(uint8_t style) {
 
     if (region == REGION_US) {
       // mm-dd-yy
-      emit_number(&display[1], timedate.date_m);
-      emit_number(&display[4], timedate.date_d);
+      emit_number_slz(&display[1], timedate.date_m);
+      emit_number_slz(&display[4], timedate.date_d);
     } else {
       // dd-mm-yy
-      emit_number(&display[1], timedate.date_d);
-      emit_number(&display[4], timedate.date_m);
+      emit_number_slz(&display[1], timedate.date_d);
+      emit_number_slz(&display[4], timedate.date_m);
     }
     // the yy part is the same
     emit_number(&display[7], timedate.date_y);
@@ -1478,7 +1478,7 @@ void display_date(uint8_t style) {
     case 12:
       display_str("decem"); break;
     }
-    emit_number(&display[7], timedate.date_d);
+    emit_number_slz(&display[7], timedate.date_d);
   }
 }
 
