@@ -790,7 +790,6 @@ static void update_toggle(unsigned char *v)
 static void update_vol(unsigned char *v)
 {
   *v = !*v;
-  volume = *v;
   speaker_init();
   beep(4000, 1);
 }
@@ -843,19 +842,19 @@ static unsigned char dash_P[] PROGMEM = "-";
 #define DASH	  { show_str, NULL, dash_P }
 
 static const struct field alarm_fields[] PROGMEM = {
-  { show_hour, update_hour, &menu_state.time.h },
+  { show_hour, update_hour, &alarm.h },
   DASH,
-  { show_num, update_mod60, &menu_state.time.m },
+  { show_num, update_mod60, &alarm.m },
   SPACE,
-  { show_ampm, NULL, &menu_state.time.h },
+  { show_ampm, NULL, &alarm.h },
 };
 
 static const struct field time_fields[] PROGMEM = {
-  { show_hour, update_hour, &menu_state.time.h },
+  { show_hour, update_hour, &timedate.time.h },
   SPACE,
-  { show_num, update_mod60, &menu_state.time.m },
+  { show_num, update_mod60, &timedate.time.m },
   SPACE,
-  { show_second, NULL, (unsigned char *)&menu_state.time },
+  { show_second, NULL, (unsigned char *)&timedate.time },
 };
 
 static const struct field timeset_fields[] PROGMEM = {
@@ -867,29 +866,29 @@ static const struct field timeset_fields[] PROGMEM = {
 };
 
 static const struct field us_date_fields[] PROGMEM = {
-  { show_num, update_month, &menu_state.date.m },
+  { show_num, update_month, &timedate.date.m },
   DASH,
-  { show_num, update_day, &menu_state.date.d },
+  { show_num, update_day, &timedate.date.d },
   DASH,
-  { show_num, update_year, &menu_state.date.y },
+  { show_num, update_year, &timedate.date.y },
 };
 
 static const struct field euro_date_fields[] PROGMEM = {
-  { show_num, update_day, &menu_state.date.d },
+  { show_num, update_day, &timedate.date.d },
   DASH,
-  { show_num, update_month, &menu_state.date.m },
+  { show_num, update_month, &timedate.date.m },
   DASH,
-  { show_num, update_year, &menu_state.date.y },
+  { show_num, update_year, &timedate.date.y },
 };
 
 static const struct field dotw_fields[] PROGMEM = {
-  { show_dayofweek, NULL, (unsigned char *)&menu_state.date },
+  { show_dayofweek, NULL, (unsigned char *)&timedate.date },
 };
 
 static const struct field monthdate_fields[] PROGMEM = {
-  { show_monthname, NULL, &menu_state.date.m },
+  { show_monthname, NULL, &timedate.date.m },
   SPACE,
-  { show_num_slz, NULL, &menu_state.date.d },
+  { show_num_slz, NULL, &timedate.date.d },
 };
 
 static unsigned char brite_P[] PROGMEM = "brite ";
@@ -901,17 +900,17 @@ static const struct field brite_fields[] PROGMEM = {
 static unsigned char vol_P[] PROGMEM = "vol ";
 static const struct field vol_fields[] PROGMEM = {
   { show_str, NULL, vol_P },
-  { show_vol, update_vol, &menu_state.val },
+  { show_vol, update_vol, &volume },
 };
 
 static const struct field region_fields[] PROGMEM = {
-  { show_region, update_toggle, &menu_state.val },
+  { show_region, update_toggle, &region },
 };
 
 static unsigned char sec_P[] PROGMEM = "sec ";
 static const struct field secmode_fields[] PROGMEM = {
   { show_str, NULL, sec_P },
-  { show_secmode, update_secmode, &menu_state.val },
+  { show_secmode, update_secmode, &secondmode },
 };
 
 #define NELEM(a)	(sizeof(a) / sizeof(*a))
@@ -924,13 +923,10 @@ static void copy_fields(const struct field PROGMEM *fields, unsigned int nelem)
 static void get_alarm(void)
 {
   copy_fields(alarm_fields, NELEM(alarm_fields));
-  menu_state.time = alarm;
 }
 
 static void store_alarm(void)
 {
-  alarm = menu_state.time;
-
   eeprom_write_byte((uint8_t *)EE_ALARM_HOUR, alarm.h);
   eeprom_write_byte((uint8_t *)EE_ALARM_MIN, alarm.m);
 }
@@ -959,8 +955,6 @@ static void store_time(void)
 
 static void get_date(void)
 {
-  menu_state.date = timedate.date;
-
   if (region == REGION_US) {
     copy_fields(us_date_fields, NELEM(us_date_fields));
   } else {
@@ -970,13 +964,6 @@ static void get_date(void)
 
 static void store_date(void)
 {
-  /* A bit ultra-paranoid: make sure the date doesn't get corrupted
-   * just in case they're setting the time at precisely midnight and
-   * this assignment is interrupted by time update. */
-  cli();
-  timedate.date = menu_state.date;
-  sei();
-
   eeprom_write_byte((uint8_t *)EE_DAY, timedate.date.d);    
   eeprom_write_byte((uint8_t *)EE_MONTH, timedate.date.m);    
   eeprom_write_byte((uint8_t *)EE_YEAR, timedate.date.y);    
@@ -996,36 +983,31 @@ static void store_brite(void)
 static void get_vol(void)
 {
   copy_fields(vol_fields, NELEM(vol_fields));
-  menu_state.val = eeprom_read_byte((uint8_t *)EE_VOLUME);
 }
 
 static void store_vol(void)
 {
-   eeprom_write_byte((uint8_t *)EE_VOLUME, menu_state.val);
+   eeprom_write_byte((uint8_t *)EE_VOLUME, volume);
 }
 
 static void get_region(void)
 {
   copy_fields(region_fields, NELEM(region_fields));
-  menu_state.val = eeprom_read_byte((uint8_t *)EE_REGION);
 }
 
 static void store_region(void)
 {
-  region = menu_state.val;
-  eeprom_write_byte((uint8_t *)EE_REGION, menu_state.val);
+  eeprom_write_byte((uint8_t *)EE_REGION, region);
 }
 
 static void get_secmode(void)
 {
   copy_fields(secmode_fields, NELEM(secmode_fields));
-  menu_state.val = eeprom_read_byte((uint8_t *)EE_SECONDMODE);
 }
 
 static void store_secmode(void)
 {
-  secondmode = menu_state.val;
-  eeprom_write_byte((uint8_t *)EE_SECONDMODE, menu_state.val);
+  eeprom_write_byte((uint8_t *)EE_SECONDMODE, secondmode);
 }
 
 static const struct entry mainmenu[] = {
@@ -1138,8 +1120,6 @@ static void show_menu(const struct entry *menu, int nentries)
 static void display_time(void)
 {
   copy_fields(time_fields, NELEM(time_fields));
-  barrier();
-  menu_state.time = timedate.time;
   display_entry(-1);
 }
 
@@ -1160,7 +1140,6 @@ static void display_date(uint8_t style)
     break;
 
   case DAY:
-    menu_state.date = timedate.date;
     copy_fields(dotw_fields, NELEM(dotw_fields));
     display_entry(-1);
     delayms(1000);
