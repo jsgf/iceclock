@@ -195,17 +195,13 @@ SIGNAL(SIG_PIN_CHANGE2) {
     if (! (last_buttonstate & 0x1)) { // was not pressed before
       delayms(10);                    // debounce
       if (PIND & _BV(BUTTON1))        // filter out bounces
-      {
-        PCMSK2 = _BV(PCINT21) | _BV(PCINT20);
-	return;
-      }
+	goto out;
       tick();                         // make a noise
       // check if we will snag this button press for snoozing
       if (alarming) {
 	// turn on snooze
 	setsnooze();
-	PCMSK2 = _BV(PCINT21) | _BV(PCINT20);
-	return;
+	goto out;
       }
       last_buttonstate |= 0x1;
       just_pressed |= 0x1;
@@ -220,10 +216,7 @@ SIGNAL(SIG_PIN_CHANGE2) {
     if (! (last_buttonstate & 0x4)) { // was not pressed before
       delayms(10);                    // debounce
       if (PIND & _BV(BUTTON3))        // filter out bounces
-      {
-        PCMSK2 = _BV(PCINT21) | _BV(PCINT20);
-	return;
-      }
+	goto out;
       buttonholdcounter = 2;          // see if we're press-and-holding
       while (buttonholdcounter) {
 	if (PIND & _BV(BUTTON3)) {        // released
@@ -233,13 +226,11 @@ SIGNAL(SIG_PIN_CHANGE2) {
 	  if (alarming) {
 	    // turn on snooze
 	    setsnooze();
-	    PCMSK2 = _BV(PCINT21) | _BV(PCINT20);
-	    return;
+	    goto out;
 	  }
 	  DEBUGP("b3");
 	  just_pressed |= 0x4;
-	  PCMSK2 = _BV(PCINT21) | _BV(PCINT20);
-	  return;
+	  goto out;
 	}
       }
       last_buttonstate |= 0x4;
@@ -249,6 +240,7 @@ SIGNAL(SIG_PIN_CHANGE2) {
     pressed = 0;                      // button released
     last_buttonstate &= ~0x4;
   }
+out:
   PCMSK2 = _BV(PCINT21) | _BV(PCINT20);
 }
 
@@ -261,16 +253,12 @@ SIGNAL(SIG_PIN_CHANGE0) {
     if (! (last_buttonstate & 0x2)) { // was not pressed before
       delayms(10);                    // debounce
       if (PINB & _BV(BUTTON2))        // filter out bounces
-      {
-        PCMSK0 = _BV(PCINT0);
-         return;
-      }
+	goto out;
       tick();                         // make a noise
       // check if we will snag this button press for snoozing
       if (alarming) {
-   setsnooze();    // turn on snooze
-  PCMSK0 = _BV(PCINT0);
-   return;
+	setsnooze();    // turn on snooze
+	goto out;
       }
       last_buttonstate |= 0x2;
       just_pressed |= 0x2;
@@ -279,6 +267,7 @@ SIGNAL(SIG_PIN_CHANGE0) {
   } else {
     last_buttonstate &= ~0x2;
   }
+out:
   PCMSK0 = _BV(PCINT0);
 }
 
@@ -388,11 +377,9 @@ SIGNAL(SIG_INTERRUPT0) {
   sei();
   delayms(10); // wait for debouncing
   if (x != (ALARM_PIN & _BV(ALARM)))
-  {
-    EIMSK = _BV(INT0);
-    return;
-  }
+    goto out;
   setalarmstate();
+out:
   EIMSK = _BV(INT0);  //And reenable it before exiting.
 }
 
