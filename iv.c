@@ -965,6 +965,21 @@ void set_date(void) {
   }
 }
 
+static void __emit_number(uint8_t *disp, uint8_t num, uint8_t extra)
+{
+  disp[0] = pgm_read_byte(numbertable + (num / 10)) | extra;
+  disp[1] = pgm_read_byte(numbertable + (num % 10)) | extra; 
+}
+
+static void emit_number(uint8_t *disp, uint8_t num)
+{
+  __emit_number(disp, num, 0);
+}
+
+static void emit_number_dots(uint8_t *disp, uint8_t num)
+{
+  __emit_number(disp, num, 0x1);
+}
 
 void set_brightness(void) {
   uint8_t mode = SHOW_MENU;
@@ -994,8 +1009,7 @@ void set_brightness(void) {
 	mode = SET_BRITE;
 	// display brightness
 	display_str("brite ");
-	display[7] = pgm_read_byte(numbertable + (brightness / 10)) | 0x1;
-	display[8] = pgm_read_byte(numbertable + (brightness % 10)) | 0x1;
+	emit_number_dots(&display[7], brightness);
       } else {	
 	displaymode = SHOW_TIME;
 	eeprom_write_byte((uint8_t *)EE_BRIGHT, brightness);
@@ -1008,8 +1022,7 @@ void set_brightness(void) {
 	brightness += 5;
 	if (brightness > 90)
 	  brightness = 30;
-	display[7] = pgm_read_byte(numbertable + (brightness / 10)) | 0x1;
-	display[8] = pgm_read_byte(numbertable + (brightness % 10)) | 0x1;
+	emit_number_dots(&display[7], brightness);
 
 	OCR0A = ((brightness + 4) / 5) * 5;
       }
@@ -1373,21 +1386,15 @@ void display_date(uint8_t style) {
 
     if (region == REGION_US) {
       // mm-dd-yy
-      display[1] = pgm_read_byte(numbertable + (date_m / 10));
-      display[2] = pgm_read_byte(numbertable + (date_m % 10));
-      display[4] = pgm_read_byte(numbertable + (date_d / 10));
-      display[5] = pgm_read_byte(numbertable + (date_d % 10));
+      emit_number(&display[1], date_m);
+      emit_number(&display[4], date_d);
     } else {
       // dd-mm-yy
-      display[1] = pgm_read_byte(numbertable + (date_d / 10));
-      display[2] = pgm_read_byte(numbertable + (date_d % 10));
-      display[4] = pgm_read_byte(numbertable + (date_m / 10));
-      display[5] = pgm_read_byte(numbertable + (date_m % 10));
+      emit_number(&display[1], date_d);
+      emit_number(&display[4], date_m);
     }
     // the yy part is the same
-    display[7] = pgm_read_byte(numbertable + (date_y / 10));
-    display[8] = pgm_read_byte(numbertable + (date_y % 10));
-
+    emit_number(&display[7], date_y);
   } else if (style == DAY) {
     // This is more "Sunday June 21" style
 
@@ -1454,9 +1461,7 @@ void display_date(uint8_t style) {
     case 12:
       display_str("decem"); break;
     }
-    display[7] = pgm_read_byte(numbertable + (date_d / 10));
-    display[8] = pgm_read_byte(numbertable + (date_d % 10));
-    
+    emit_number(&display[7], date_d);
   }
 }
 
@@ -1464,17 +1469,14 @@ void display_date(uint8_t style) {
 void display_time(uint8_t h, uint8_t m, uint8_t s) {
   
   // seconds and minutes are at the end
-  display[8] =  pgm_read_byte(numbertable + (s % 10));
-  display[7] =  pgm_read_byte(numbertable + (s / 10));
+  emit_number(&display[7], s);
   display[6] = 0;
-  display[5] =  pgm_read_byte(numbertable + (m % 10));
-  display[4] =  pgm_read_byte(numbertable + (m / 10)); 
+  emit_number(&display[4], m);
   display[3] = 0;
 
   // check euro (24h) or US (12h) style time
   if (region == REGION_US) {
-    display[2] =  pgm_read_byte(numbertable + ( (((h+11)%12)+1) % 10));
-    display[1] =  pgm_read_byte(numbertable + ( (((h+11)%12)+1) / 10));
+    emit_number(&display[1], ((h+11)%12)+1);
 
     // We use the '*' as an am/pm notice
     if (h >= 12)
@@ -1482,8 +1484,7 @@ void display_time(uint8_t h, uint8_t m, uint8_t s) {
     else 
       display[0] &= ~0x1;  // 'pm' notice
   } else {
-    display[2] =  pgm_read_byte(numbertable + ( (h%24) % 10));
-    display[1] =  pgm_read_byte(numbertable + ( (h%24) / 10));
+    emit_number(&display[1], h%24);
   }
 }
 
@@ -1492,8 +1493,7 @@ void display_alarm(uint8_t h, uint8_t m){
   display[8] = 0;
   display[7] = 0;
   display[6] = 0;
-  display[5] = pgm_read_byte(numbertable + (m % 10));
-  display[4] = pgm_read_byte(numbertable + (m / 10)); 
+  emit_number(&display[4], m);
   display[3] = 0;
 
   // check euro or US style time
@@ -1507,11 +1507,9 @@ void display_alarm(uint8_t h, uint8_t m){
     }
     display[8] = pgm_read_byte(alphatable + 'm' - 'a');
 
-    display[2] =  pgm_read_byte(numbertable + ( (((h+11)%12)+1) % 10));
-    display[1] =  pgm_read_byte(numbertable + ( (((h+11)%12)+1) / 10));
+    emit_number(&display[1], ((h+11)%12)+1);
   } else {
-      display[2] =  pgm_read_byte(numbertable + ( (((h+23)%24)+1) % 10));
-    display[1] =  pgm_read_byte(numbertable + ( (((h+23)%24)+1) / 10));
+    emit_number(&display[1], ((h+23)%24)+1);
   }
 }
 
