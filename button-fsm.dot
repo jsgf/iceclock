@@ -1,0 +1,12 @@
+digraph switch {
+	open -> closed [label="button\npressed"];
+
+	closed -> latched [label="held for\ndebounce\nrept=init"];
+	closed -> open [label="button\nreleased"];
+
+	sampled -> latched [label="button repeat\ntimeout\nrept=rate"];
+	sampled -> open [label="button\nreleased"];
+
+	latched -> sampled [label="state\nsampled"];
+	latched -> open [label="button\nreleased"];
+}

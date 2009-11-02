@@ -153,6 +153,177 @@ void kickthedog(void) {
   wdt_reset();
 }
 
+static inline uint16_t time_since(uint16_t then)
+{
+  return now() - then;
+}
+
+/*
+Button state machine:
+
+digraph switch {
+	open -> closed [label="button\npressed"];
+
+	closed -> latched [label="held for\ndebounce\nrept=init"];
+	closed -> open [label="button\nreleased"];
+
+	sampled -> latched [label="button repeat\ntimeout\nrept=rate"];
+	sampled -> open [label="button\nreleased"];
+
+	latched -> sampled [label="state\nsampled"];
+	latched -> open [label="button\nreleased"];
+}
+*/
+
+#define DEBOUNCE	10	/* ms button must be pressed to be noticed */
+
+#define REPT_INIT	800	/* ms before repeat starts */
+#define REPT_RATE	60	/* ms between repeats */
+
+#define NBUTTONS	4
+
+/* Button latched bits */
+#define BUT_MENU	0
+#define BUT_SET		1
+#define BUT_NEXT	2
+#define BUT_ALARM	3      /* not really a button, but still needs debounce */
+
+static uint8_t button_state;		/* state for each button */
+static uint16_t button_time[NBUTTONS];	/* timestamp for current state */
+static uint16_t button_lastpress;	/* timestamp last button entered LATCHED */
+static uint16_t button_repeat;		/* timeout for NEXT button repeat */
+
+/* button states */
+#define BS_OPEN		0	/* not pressed */
+#define BS_CLOSED	1	/* just pressed */
+#define BS_LATCHED	2	/* latched, but unsampled */
+#define BS_SAMPLED	3	/* latched and sampled */
+
+#define BS_LOG_NSTATES	2
+#define BS_NSTATES	(1 << BS_LOG_NSTATES)
+#define BS_MASK		(BS_NSTATES - 1)
+
+#define BSTATE(b,s)	((s) << ((b) * BS_LOG_NSTATES))
+
+#define BOPEN(b)	BSTATE(b, BS_OPEN)
+#define BCLOSED(b)	BSTATE(b, BS_CLOSED)
+#define BLATCHED(b)	BSTATE(b, BS_LATCHED)
+#define BSAMPLED(b)	BSTATE(b, BS_SAMPLED)
+
+#define BMASK(b)	BSTATE(b, BS_MASK)
+
+/*
+ * We got an interrupt for a button; update state.  Expected to be
+ * called with button interrupt source masked.
+ * button = button number (0 - NBUTTONS)
+ */
+static void button_change_intr(uint8_t button, uint8_t state)
+{
+  uint8_t bmask = BMASK(button);
+  uint8_t bstate = button_state & bmask;
+
+  if (state) {
+    /* pressed, so open->closed, anything else unaffected */
+    if (bstate == BOPEN(button)) {
+      bstate = BCLOSED(button);
+      /* record press time for debounce */
+      button_time[button] = now();
+    }
+  } else {
+    /* button released, so anything->open */
+    bstate = BOPEN(button);
+  }
+
+  /* update state */
+  button_state = (button_state & ~bmask) | bstate;
+}
+
+/* Called every millisecond(ish) to update button state */
+static void button_state_update(void)
+{
+  uint8_t i;
+  uint8_t bs = button_state;
+  uint16_t timeout, rept;
+
+  for (i = 0; i < NBUTTONS; i++) {
+    uint8_t s = bs & BS_MASK;
+    switch (s) {
+    case BS_OPEN:
+    case BS_LATCHED:
+      /* no time-based state changes */
+      break;
+
+    /* closed and sampled transition to latched with appropriate timeout */
+    case BS_CLOSED:
+      timeout = DEBOUNCE;
+      rept = REPT_INIT;		/* closed->latched reset initial repeat timeout */
+      goto timelatch;
+
+    case BS_SAMPLED:
+      timeout = 0;		/* no repeat for MENU and SET */
+      if (i == BUT_NEXT) {
+	timeout = button_repeat;
+	rept = REPT_RATE;
+      }
+      goto timelatch;
+
+    timelatch:
+      if (timeout && time_since(button_time[i]) >= timeout) {
+	s = BS_LATCHED;
+	/* record latched time for repeat */
+	button_time[i] = now();
+	/* update repeat rate for current state */
+	button_repeat = rept;
+      }
+      break;
+    }
+
+    /* shift out just-processed state */
+    bs >>= BS_LOG_NSTATES;
+
+    /* plonk in newly updated state */
+    bs |= s << (BS_LOG_NSTATES * (NBUTTONS-1));
+  }
+
+  button_state = bs;
+}
+
+/*
+ * Must be careful to make sure this is tested before now() rolls over
+ * (64k ms = ~1 min)
+ */
+static uint8_t button_timeout(void)
+{
+  return time_since(button_lastpress) > (INACTIVITYTIMEOUT * 1000);
+}
+
+/* Poll the current state of button without changing it */
+static uint8_t button_poll(uint8_t button)
+{
+  barrier();
+  return (button_state & BMASK(button)) == BLATCHED(button);
+}
+
+/*
+ * Given a button, return true if a button is pressed, and consume the
+ * button-press.
+ */
+static uint8_t button_sample(uint8_t button)
+{
+  uint8_t ret = button_poll(button);
+
+  if (ret) {
+    /* latched -> sampled */
+    button_state = (button_state & ~BMASK(button)) | BSAMPLED(button);
+    barrier();
+
+    button_lastpress = now();
+    tick();
+  }
+
+  return ret;
+}
+
 // called @ (F_CPU/256) = ~30khz (31.25 khz)
 SIGNAL (SIG_OVERFLOW0) {
   // allow other interrupts to go off while we're doing display updates
@@ -170,6 +341,9 @@ SIGNAL (SIG_OVERFLOW0) {
 
   // ok its not really 1ms but its like within 10% :)
   milliseconds++;
+
+  // update latched and repeat state of buttons
+  button_state_update();
 
   // Cycle through each digit in the display
   if (currdigit >= DISPLAYSIZE)
@@ -206,17 +380,7 @@ SIGNAL (SIG_OVERFLOW0) {
   
 }
 
-#define BUT_MENU	(1<<0)
-#define BUT_SET		(1<<1)
-#define BUT_NEXT	(1<<2)
-
 // We use the pin change interrupts to detect when buttons are pressed
-
-// These store the current button states for all 3 buttons. We can 
-// then query whether the buttons are pressed and released or pressed
-// This allows for 'high speed incrementing' when setting the time
-volatile uint8_t last_buttonstate = 0, just_pressed = 0, pressed = 0;
-volatile uint8_t buttonholdcounter = 0;
 
 // This interrupt detects switches 1 and 3
 SIGNAL(SIG_PIN_CHANGE2) {
@@ -226,57 +390,9 @@ SIGNAL(SIG_PIN_CHANGE2) {
   // kick the dog
   kickthedog();
 
-  if (! (PIND & _BV(BUTTON1))) {
-    // button1 is pressed
-    if (! (last_buttonstate & BUT_MENU)) { // was not pressed before
-      delayms(10);                    // debounce
-      if (PIND & _BV(BUTTON1))        // filter out bounces
-	goto out;
-      tick();                         // make a noise
-      // check if we will snag this button press for snoozing
-      if (alarming) {
-	// turn on snooze
-	setsnooze();
-	goto out;
-      }
-      last_buttonstate |= BUT_MENU;
-      just_pressed |= BUT_MENU;
-      DEBUGP("b1");
-    }
-  } else {
-    last_buttonstate &= ~BUT_MENU;
-  }
+  button_change_intr(0, !(PIND & _BV(BUTTON1)));
+  button_change_intr(2, !(PIND & _BV(BUTTON3)));
 
-  if (! (PIND & _BV(BUTTON3))) {
-    // button3 is pressed
-    if (! (last_buttonstate & BUT_NEXT)) { // was not pressed before
-      delayms(10);                    // debounce
-      if (PIND & _BV(BUTTON3))        // filter out bounces
-	goto out;
-      buttonholdcounter = 2;          // see if we're press-and-holding
-      while (buttonholdcounter) {
-	if (PIND & _BV(BUTTON3)) {        // released
-	  tick();                         // make a noise
-	  last_buttonstate &= ~BUT_NEXT;
-	  // check if we will snag this button press for snoozing
-	  if (alarming) {
-	    // turn on snooze
-	    setsnooze();
-	    goto out;
-	  }
-	  DEBUGP("b3");
-	  just_pressed |= BUT_NEXT;
-	  goto out;
-	}
-      }
-      last_buttonstate |= BUT_NEXT;
-      pressed |= BUT_NEXT;                 // held down
-    }
-  } else {
-    pressed = 0;                      // button released
-    last_buttonstate &= ~BUT_NEXT;
-  }
-out:
   PCMSK2 = _BV(PCINT21) | _BV(PCINT20);
 }
 
@@ -284,32 +400,11 @@ out:
 SIGNAL(SIG_PIN_CHANGE0) {
   PCMSK0 = 0;
   sei();
-  if (! (PINB & _BV(BUTTON2))) {
-    // button2 is pressed
-    if (! (last_buttonstate & BUT_SET)) { // was not pressed before
-      delayms(10);                    // debounce
-      if (PINB & _BV(BUTTON2))        // filter out bounces
-	goto out;
-      tick();                         // make a noise
-      // check if we will snag this button press for snoozing
-      if (alarming) {
-	setsnooze();    // turn on snooze
-	goto out;
-      }
-      last_buttonstate |= BUT_SET;
-      just_pressed |= BUT_SET;
-      DEBUGP("b2");
-    }
-  } else {
-    last_buttonstate &= ~BUT_SET;
-  }
-out:
+
+  button_change_intr(1, !(PINB & _BV(BUTTON2)));
+
   PCMSK0 = _BV(PCINT0);
 }
-
-// This variable keeps track of whether we have not pressed any
-// buttons in a few seconds, and turns off the menu display
-volatile uint8_t timeoutcounter = 0;
 
 // this goes off once a second
 SIGNAL (TIMER2_OVF_vect) {
@@ -397,10 +492,6 @@ SIGNAL (TIMER2_OVF_vect) {
     snoozetimer = 0;
   }
 
-  if (timeoutcounter)
-    timeoutcounter--;
-  if (buttonholdcounter)
-    buttonholdcounter--;
   if (snoozetimer) {
     snoozetimer--;
     if (snoozetimer % 2) 
@@ -547,15 +638,21 @@ void gotosleep(void) {
 
 
 void initbuttons(void) {
-    DDRB =  _BV(VFDCLK) | _BV(VFDDATA) | _BV(SPK1) | _BV(SPK2);
-    DDRD = _BV(BOOST) | _BV(VFDSWITCH);
-    DDRC = _BV(VFDLOAD) | _BV(VFDBLANK) | _BV(4);
-    PORTD = _BV(BUTTON1) | _BV(BUTTON3) | _BV(ALARM);
-    PORTB = _BV(BUTTON2);
+  DDRB =  _BV(VFDCLK) | _BV(VFDDATA) | _BV(SPK1) | _BV(SPK2);
+  DDRD = _BV(BOOST) | _BV(VFDSWITCH);
+  DDRC = _BV(VFDLOAD) | _BV(VFDBLANK) | _BV(4);
+  PORTD = _BV(BUTTON1) | _BV(BUTTON3) | _BV(ALARM);
+  PORTB = _BV(BUTTON2);
 
-    PCICR = _BV(PCIE0) | _BV(PCIE2);
-    PCMSK0 = _BV(PCINT0);
-    PCMSK2 = _BV(PCINT21) | _BV(PCINT20);    
+  PCICR = _BV(PCIE0) | _BV(PCIE2);
+  PCMSK0 = _BV(PCINT0);
+  PCMSK2 = _BV(PCINT21) | _BV(PCINT20);    
+
+  /* Set button FSM up for current switch state */
+  button_change_intr(BUT_MENU, !(PIND & _BV(BUTTON1)));
+  button_change_intr(BUT_SET,  !(PINB & _BV(BUTTON2)));
+  button_change_intr(BUT_NEXT, !(PIND & _BV(BUTTON3)));
+  button_change_intr(BUT_ALARM, !(ALARM_PIN & _BV(ALARM)));
 }
 
 
@@ -654,8 +751,14 @@ int main(void) {
       continue;
     }
     //DEBUGP(".");
-    if (just_pressed & BUT_MENU) {
-      just_pressed = 0;
+
+    /* If the alarm is on then any button-press will kick off snooze */
+    if (alarming && (button_sample(BUT_MENU) || button_sample(BUT_SET) || button_sample(BUT_NEXT))) {
+      setsnooze();
+      continue;
+    }
+
+    if (button_sample(BUT_MENU)) {
       switch(displaymode) {
       case (SHOW_TIME):
 	displaymode = SET_ALARM;
@@ -698,8 +801,7 @@ int main(void) {
       default:
 	displaymode = SHOW_TIME;
       }
-    } else if ((just_pressed & BUT_SET) || (just_pressed & BUT_NEXT)) {
-      just_pressed = 0;
+    } else if (button_sample(BUT_SET) || button_sample(BUT_NEXT)) {
       displaymode = NONE;
       display_date(DAY);
 
@@ -726,16 +828,11 @@ void set_alarm(void)
   min = alarm_m;
   sec = 0;
   
-  timeoutcounter = INACTIVITYTIMEOUT;
-  
   while (1) {
-    if (just_pressed & BUT_MENU) { // mode change
+    if (button_poll(BUT_MENU)) { // mode change
       return;
     }
-    if (just_pressed || pressed) {
-      timeoutcounter = INACTIVITYTIMEOUT;  
-      // timeout w/no buttons pressed after 3 seconds?
-    } else if (!timeoutcounter) {
+    if (button_timeout()) {
       //timed out!
       displaymode = SHOW_TIME;     
       alarm_h = hour;
@@ -744,8 +841,8 @@ void set_alarm(void)
       eeprom_write_byte((uint8_t *)EE_ALARM_MIN, alarm_m);    
       return;
     }
-    if (just_pressed & BUT_SET) {
-      just_pressed = 0;
+
+    if (button_sample(BUT_SET)) {
       if (mode == SHOW_MENU) {
 	// ok now its selected
 	mode = SET_HOUR;
@@ -767,9 +864,8 @@ void set_alarm(void)
 	return;
       }
     }
-    if ((just_pressed & BUT_NEXT) || (pressed & BUT_NEXT)) {
-      just_pressed = 0;
 
+    if (button_sample(BUT_NEXT)) {
       if (mode == SET_HOUR) {
 	hour = (hour+1) % 24;
 	display_alarm(hour, min);
@@ -782,9 +878,6 @@ void set_alarm(void)
 	display[4] |= 0x1;
 	display[5] |= 0x1;
       }
-
-      if (pressed & BUT_NEXT)
-	delayms(75);
     }
   }
 }
@@ -799,22 +892,16 @@ void set_time(void)
   sec = timedate.time_s;
   mode = SHOW_MENU;
 
-  timeoutcounter = INACTIVITYTIMEOUT;
-  
   while (1) {
-    if (just_pressed & BUT_MENU) { // mode change
+    if (button_poll(BUT_MENU)) { // mode change
       return;
     }
-    if (just_pressed || pressed) {
-      timeoutcounter = INACTIVITYTIMEOUT;  
-      // timeout w/no buttons pressed after 3 seconds?
-    } else if (!timeoutcounter) {
+    if (button_timeout()) {
       //timed out!
       displaymode = SHOW_TIME;     
       return;
     }
-    if (just_pressed & BUT_SET) {
-      just_pressed = 0;
+    if (button_sample(BUT_SET)) {
       if (mode == SHOW_MENU) {
 	hour = timedate.time_h;
 	min = timedate.time_m;
@@ -844,9 +931,7 @@ void set_time(void)
 	return;
       }
     }
-    if ((just_pressed & BUT_NEXT) || (pressed & BUT_NEXT)) {
-      just_pressed = 0;
-      
+    if (button_sample(BUT_NEXT)) {      
       if (mode == SET_HOUR) {
 	hour = (hour+1) % 24;
 	display_time(hour, min, sec);
@@ -870,9 +955,6 @@ void set_time(void)
 	display[8] |= 0x1;
 	timedate.time_s = sec;
       }
-      
-      if (pressed & BUT_NEXT)
-	delayms(75);
     }
   }
 }
@@ -882,23 +964,17 @@ void set_time(void)
 void set_date(void) {
   uint8_t mode = SHOW_MENU;
 
-  timeoutcounter = INACTIVITYTIMEOUT;;  
-
   while (1) {
-    if (just_pressed || pressed) {
-      timeoutcounter = INACTIVITYTIMEOUT;;  
-      // timeout w/no buttons pressed after 3 seconds?
-    } else if (!timeoutcounter) {
+    if (button_timeout()) {
       //timed out!
       displaymode = SHOW_TIME;     
       return;
     }
-    if (just_pressed & BUT_MENU) { // mode change
+    if (button_poll(BUT_MENU)) { // mode change
       return;
     }
-    if (just_pressed & BUT_SET) {
 
-      just_pressed = 0;
+    if (button_sample(BUT_SET)) {
       if (mode == SHOW_MENU) {
 	// start!
 	if (region == REGION_US) {
@@ -934,8 +1010,8 @@ void set_date(void) {
 	return;
       }
     }
-    if ((just_pressed & BUT_NEXT) || (pressed & BUT_NEXT)) {
-      just_pressed = 0;
+
+    if (button_sample(BUT_NEXT)) {
       if (mode == SET_MONTH) {
 	timedate.date_m++;
 	if (timedate.date_m >= 13)
@@ -973,9 +1049,6 @@ void set_date(void) {
 	display[8] |= 0x1;
 	eeprom_write_byte((uint8_t *)EE_YEAR, timedate.date_y);    
       }
-
-      if (pressed & BUT_NEXT)
-	delayms(60);
     }
   }
 }
@@ -1013,25 +1086,19 @@ void set_brightness(void) {
   uint8_t mode = SHOW_MENU;
   uint8_t brightness;
 
-  timeoutcounter = INACTIVITYTIMEOUT;;  
   brightness = eeprom_read_byte((uint8_t *)EE_BRIGHT);
 
   while (1) {
-    if (just_pressed || pressed) {
-      timeoutcounter = INACTIVITYTIMEOUT;;  
-      // timeout w/no buttons pressed after 3 seconds?
-    } else if (!timeoutcounter) {
+    if (button_timeout()) {
       //timed out!
       displaymode = SHOW_TIME;     
       eeprom_write_byte((uint8_t *)EE_BRIGHT, brightness);
       return;
     }
-    if (just_pressed & BUT_MENU) { // mode change
+    if (button_poll(BUT_MENU)) { // mode change
       return;
     }
-    if (just_pressed & BUT_SET) {
-
-      just_pressed = 0;
+    if (button_sample(BUT_SET)) {
       if (mode == SHOW_MENU) {
 	// start!
 	mode = SET_BRITE;
@@ -1044,8 +1111,7 @@ void set_brightness(void) {
 	return;
       }
     }
-    if ((just_pressed & BUT_NEXT) || (pressed & BUT_NEXT)) {
-      just_pressed = 0;
+    if (button_sample(BUT_SET) || button_sample(BUT_NEXT)) {
       if (mode == SET_BRITE) {
 	brightness += 5;
 	if (brightness > 90)
@@ -1063,23 +1129,18 @@ void set_volume(void) {
   uint8_t mode = SHOW_MENU;
   uint8_t volume;
 
-  timeoutcounter = INACTIVITYTIMEOUT;;  
   volume = eeprom_read_byte((uint8_t *)EE_VOLUME);
 
   while (1) {
-    if (just_pressed || pressed) {
-      timeoutcounter = INACTIVITYTIMEOUT;;  
-      // timeout w/no buttons pressed after 3 seconds?
-    } else if (!timeoutcounter) {
+    if (button_timeout()) {
       //timed out!
       displaymode = SHOW_TIME;     
       return;
     }
-    if (just_pressed & BUT_MENU) { // mode change
+    if (button_poll(BUT_MENU)) { // mode change
       return;
     }
-    if (just_pressed & BUT_SET) {
-      just_pressed = 0;
+    if (button_sample(BUT_SET)) {
       if (mode == SHOW_MENU) {
 	// start!
 	mode = SET_VOL;
@@ -1098,8 +1159,7 @@ void set_volume(void) {
 	return;
       }
     }
-    if (just_pressed & BUT_NEXT) {
-      just_pressed = 0;
+    if (button_sample(BUT_NEXT)) {
       if (mode == SET_VOL) {
 	volume = !volume;
 	if (volume) {
@@ -1125,23 +1185,18 @@ void set_volume(void) {
 void set_region(void) {
   uint8_t mode = SHOW_MENU;
 
-  timeoutcounter = INACTIVITYTIMEOUT;;  
   region = eeprom_read_byte((uint8_t *)EE_REGION);
 
   while (1) {
-    if (just_pressed || pressed) {
-      timeoutcounter = INACTIVITYTIMEOUT;;  
-      // timeout w/no buttons pressed after 3 seconds?
-    } else if (!timeoutcounter) {
+    if (button_timeout()) {
       //timed out!
       displaymode = SHOW_TIME;     
       return;
     }
-    if (just_pressed & BUT_MENU) { // mode change
+    if (button_poll(BUT_MENU)) { // mode change
       return;
     }
-    if (just_pressed & BUT_SET) {
-      just_pressed = 0;
+    if (button_sample(BUT_SET)) {
       if (mode == SHOW_MENU) {
 	// start!
 	mode = SET_REG;
@@ -1156,8 +1211,7 @@ void set_region(void) {
 	return;
       }
     }
-    if (just_pressed & BUT_NEXT) {
-      just_pressed = 0;
+    if (button_sample(BUT_NEXT)) {
       if (mode == SET_REG) {
 	region = !region;
 	if (region == REGION_US) {
