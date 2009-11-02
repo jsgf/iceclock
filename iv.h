@@ -94,7 +94,6 @@ void set_snooze(void); // not activated by default
 void beep(uint16_t freq, uint8_t times);
 void tick(void);
 
-uint8_t leapyear(uint16_t y);
 void setalarmstate(void);
 
 void setdisplay(uint8_t digit, uint8_t segments);

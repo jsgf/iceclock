@@ -426,6 +426,12 @@ SIGNAL(SIG_PIN_CHANGE0) {
   PCMSK0 = _BV(PCINT0);
 }
 
+// This will calculate leapyears, give it the year
+// and it will return 1 (true) or 0 (false)
+static uint8_t leapyear(uint16_t y) {
+  return ( (!(y % 4) && (y % 100)) || !(y % 400));
+}
+
 static void increment_time(struct timedate *td)
 {
   td->time.s++;             // one second has gone by
@@ -1540,13 +1546,6 @@ void setalarmstate(void) {
     } 
   }
 }
-
-// This will calculate leapyears, give it the year
-// and it will return 1 (true) or 0 (false)
-uint8_t leapyear(uint16_t y) {
-  return ( (!(y % 4) && (y % 100)) || !(y % 400));
-}
-
 
 /**************************** SPEAKER *****************************/
 // Set up the speaker to prepare for beeping!
