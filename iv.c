@@ -1384,8 +1384,16 @@ int main(void) {
     else
       display_time();
     
-    /* blink indicator when alarming, regardless of snooze */
-    if (alarm_on && (!alarming || timedate.time.s % 2))
+    /* flash display brightness while alarming (even while snoozing) */
+    if (alarming) {
+      if (timedate.time.s % 2)
+	OCR0A = BRITE_MAX;
+      else
+	OCR0A = BRITE_MIN;
+    } else
+      OCR0A = eeprom_read_byte((uint8_t *)EE_BRIGHT);
+
+    if (alarm_on)
       display[0] |= 0x2;
     else 
       display[0] &= ~0x2;
