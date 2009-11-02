@@ -1124,6 +1124,21 @@ void set_brightness(void) {
   }
 }
 
+static void show_vol(uint8_t volume)
+{
+  char *str;
+
+  // display volume
+  if (volume) {
+    display_str("vol high");
+    display[5] |= 0x1;
+  } else {
+    display_str("vol  low");
+  }
+  display[6] |= 0x1;
+  display[7] |= 0x1;
+  display[8] |= 0x1;
+}
 
 void set_volume(void) {
   uint8_t mode = SHOW_MENU;
@@ -1144,16 +1159,7 @@ void set_volume(void) {
       if (mode == SHOW_MENU) {
 	// start!
 	mode = SET_VOL;
-	// display volume
-	if (volume) {
-	  display_str("vol high");
-	  display[5] |= 0x1;
-	} else {
-	  display_str("vol  low");
-	}
-	display[6] |= 0x1;
-	display[7] |= 0x1;
-	display[8] |= 0x1;
+	show_vol(volume);
       } else {	
 	displaymode = SHOW_TIME;
 	return;
@@ -1162,15 +1168,7 @@ void set_volume(void) {
     if (button_sample(BUT_NEXT)) {
       if (mode == SET_VOL) {
 	volume = !volume;
-	if (volume) {
-	  display_str("vol high");
-	  display[5] |= 0x1;
-	} else {
-	  display_str("vol  low");
-	}
-	display[6] |= 0x1;
-	display[7] |= 0x1;
-	display[8] |= 0x1;
+	show_vol(volume);
 	eeprom_write_byte((uint8_t *)EE_VOLUME, volume);
 	speaker_init();
 	beep(4000, 1);
