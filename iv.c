@@ -1493,7 +1493,7 @@ void display_time(uint8_t h, uint8_t m, uint8_t s) {
 
   // check euro (24h) or US (12h) style time
   if (region == REGION_US) {
-    emit_number(&display[1], ((h+11)%12)+1);
+    emit_number_slz(&display[1], ((h+11)%12)+1);
 
     // We use the '*' as an am/pm notice
     if (h >= 12)
@@ -1524,7 +1524,7 @@ void display_alarm(uint8_t h, uint8_t m){
     }
     display[8] = pgm_read_byte(alphatable + 'm' - 'a');
 
-    emit_number(&display[1], ((h+11)%12)+1);
+    emit_number_slz(&display[1], ((h+11)%12)+1);
   } else {
     emit_number(&display[1], ((h+23)%24)+1);
   }
