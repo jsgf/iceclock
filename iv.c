@@ -117,7 +117,7 @@ uint16_t snoozetimer = 0;
  */
 static inline void sleep(void)
 {
-  asm volatile("sei; sleep" : : : "memory");
+  asm volatile("sei $ sleep" : : : "memory");
 }
 
 // We have a non-blocking delay function, milliseconds is updated by
@@ -1304,6 +1304,8 @@ void gotosleep(void) {
   // reduce the clock speed
   CLKPR = _BV(CLKPCE);
   CLKPR = _BV(CLKPS3);
+
+  SMCR = _BV(SM1) | _BV(SM0) | _BV(SE); // power-save mode
   
   //  PPR |= _BV(PRUSART0) | _BV(PRADC) | _BV(PRSPI) | _BV(PRTIM1) | _BV(PRTIM0) | _BV(PRTWI);
   PORTC |= _BV(4);  // sleep signal
@@ -1418,8 +1420,6 @@ int main(void) {
   mcustate = MCUSR;
   MCUSR = 0;
 
-  SMCR = _BV(SM1) | _BV(SM0) | _BV(SE); // sleep mode
-
   wdt_disable();
   // now turn it back on... 2 second time out
   //WDTCSR |= _BV(WDP0) | _BV(WDP1) | _BV(WDP2);
@@ -1485,6 +1485,8 @@ int main(void) {
 
     beep(4000, 1);
   }
+  
+  SMCR = _BV(SE); // idle mode
   
   DEBUGP("clock init");
   clock_init();  
