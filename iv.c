@@ -1008,39 +1008,12 @@ void set_brightness(void) {
       just_pressed = 0;
       if (mode == SET_BRITE) {
 	brightness += 5;
-	if (brightness > 91)
+	if (brightness > 90)
 	  brightness = 30;
 	display[7] = pgm_read_byte(numbertable_p + (brightness / 10)) | 0x1;
 	display[8] = pgm_read_byte(numbertable_p + (brightness % 10)) | 0x1;
-	if (brightness <= 30) {
-	  OCR0A = 30; 
-	} else if (brightness <= 35) {
-	  OCR0A = 35;
-	} else if (brightness <= 40) {
-	  OCR0A = 40;
-	} else if (brightness <= 45) {
-	  OCR0A = 45;
-	} else if (brightness <= 50) {
-	  OCR0A = 50;
-	} else if (brightness <= 55) {
-	  OCR0A = 55;
-	} else if (brightness <= 60) {
-	  OCR0A = 60;
-	} else if (brightness <= 65) {
-	  OCR0A = 65;
-	} else if (brightness <= 70) {
-	  OCR0A = 70;
-	} else if (brightness <= 75) {
-	  OCR0A = 75;
-	} else if (brightness <= 80) {
-	  OCR0A = 80;
-	} else if (brightness <= 85) {
-	  OCR0A = 85;
-	} else if (brightness <= 90) {
-	  OCR0A = 90;
-	} else {
-	  OCR0A = 30;
-	}
+
+	OCR0A = ((brightness + 4) / 5) * 5;
       }
     }
   }
@@ -1377,35 +1350,7 @@ void boost_init(uint8_t brightness) {
   if (brightness < 30)
     brightness = 30;
 
-  if (brightness <= 30) {
-    OCR0A = 30; 
-  } else if (brightness <= 35) {
-    OCR0A = 35;
-  } else if (brightness <= 40) {
-    OCR0A = 40;
-  } else if (brightness <= 45) {
-    OCR0A = 45;
-  } else if (brightness <= 50) {
-    OCR0A = 50;
-  } else if (brightness <= 55) {
-    OCR0A = 55;
-  } else if (brightness <= 60) {
-    OCR0A = 60;
-  } else if (brightness <= 65) {
-    OCR0A = 65;
-  } else if (brightness <= 70) {
-    OCR0A = 70;
-  } else if (brightness <= 75) {
-    OCR0A = 75;
-  } else if (brightness <= 80) {
-    OCR0A = 80;
-  } else if (brightness <= 85) {
-    OCR0A = 85;
-  } else if (brightness <= 90) {
-    OCR0A = 90;
-  } else {
-    OCR0A = 30;
-  }
+  OCR0A = ((brightness + 4) / 5) * 5;
 
   // fast PWM, set OC0A (boost output pin) on match
   TCCR0A = _BV(WGM00) | _BV(WGM01);  
