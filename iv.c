@@ -108,7 +108,8 @@ uint16_t alarmdiv = 0;
 #define ALARM_DIVIDER 100
 
 // How long we have been snoozing
-uint16_t snoozetimer = 0;
+static uint8_t snooze = MAXSNOOZE / 60;
+static uint16_t snoozetimer = 0;
 
 /* 
  * Idle MCU while waiting for interrupts; enables interrupts, so can
@@ -145,12 +146,10 @@ void delayms(uint16_t ms) {
 }
 
 // When the alarm is going off, pressing a button turns on snooze mode
-// this sets the snoozetimer off in MAXSNOOZE seconds - which turns on
+// this sets the snoozetimer off in snooze seconds - which turns on
 // the alarm again
 void setsnooze(void) {
-  //snoozetimer = eeprom_read_byte((uint8_t *)EE_SNOOZE);
-  //snoozetimer *= 60; // convert minutes to seconds
-  snoozetimer = MAXSNOOZE;
+  snoozetimer = snooze * 60; // convert minutes to seconds
   DEBUGP("snooze");
   display_str("snoozing");
   delayms(1000);
@@ -980,6 +979,12 @@ static const struct field secmode_fields[] PROGMEM = {
   { show_secmode, update_secmode, &secondmode },
 };
 
+static unsigned char snoz_P[] PROGMEM = "snoz ";
+static const struct field snooze_fields[] PROGMEM = {
+  { show_str, NULL, snoz_P },
+  { show_num_slz, update_mod60, &snooze },
+};
+
 #define NELEM(a)	(sizeof(a) / sizeof(*a))
 static void copy_fields(const struct field PROGMEM *fields, unsigned int nelem)
 {
@@ -1079,8 +1084,19 @@ static void store_secmode(void)
   eeprom_write_byte((uint8_t *)EE_SECONDMODE, secondmode);
 }
 
+static void get_snooze(void)
+{
+  copy_fields(snooze_fields, NELEM(snooze_fields));
+}
+
+static void store_snooze(void)
+{
+  eeprom_write_byte((uint8_t *)EE_SNOOZE, snooze);
+}
+
 static const struct entry mainmenu[] = {
   { "set alarm", get_alarm, store_alarm },
+  { "set snoz", get_snooze, store_snooze },
   { "set time", get_time, store_time },
   { "set date", get_date, store_date },
   { "day brite", get_day, store_brite },
@@ -1476,7 +1492,10 @@ int main(void) {
 
     region = eeprom_read_byte((uint8_t *)EE_REGION);
     secondmode = eeprom_read_byte((uint8_t *)EE_SECONDMODE);
-    
+    snooze = eeprom_read_byte((uint8_t *)EE_SNOOZE);
+    if (snooze > 60)
+      snooze = MAXSNOOZE / 60;
+
     DEBUGP("speaker init");
 
     // read the preferences for high/low volume
