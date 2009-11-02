@@ -957,6 +957,13 @@ static void display_time(void)
   display_entry(-1);
 }
 
+// Kinda like display_time but just hours and minutes
+void display_alarm(void)
+{
+  get_alarm();
+  display_entry(-1);
+}
+
 void gotosleep(void) {
   // battery
   //if (sleepmode) //already asleep?
@@ -1251,7 +1258,7 @@ void setalarmstate(void) {
       // its not actually SHOW_SNOOZE but just anything but SHOW_TIME
       delayms(1000);
       // show the current alarm time set
-      display_alarm(alarm.h, alarm.m);
+      display_alarm();
       delayms(1000);
       // after a second, go back to clock mode
   } else {
@@ -1452,31 +1459,6 @@ void display_date(uint8_t style) {
       display_str("decem"); break;
     }
     emit_number_slz(&display[7], timedate.date.d);
-  }
-}
-
-// Kinda like display_time but just hours and minutes
-void display_alarm(uint8_t h, uint8_t m){ 
-  display[8] = 0;
-  display[7] = 0;
-  display[6] = 0;
-  emit_number(&display[4], m);
-  display[3] = 0;
-
-  // check euro or US style time
-  if (region == REGION_US) {
-    if (h >= 12) {
-      display[0] |= 0x1;  // 'pm' notice
-      display[7] = pgm_read_byte(alphatable + 'p' - 'a');
-    } else {
-      display[7] = pgm_read_byte(alphatable + 'a' - 'a');
-      display[0] &= ~0x1;  // 'am' notice
-    }
-    display[8] = pgm_read_byte(alphatable + 'm' - 'a');
-
-    emit_number_slz(&display[1], ((h+11)%12)+1);
-  } else {
-    emit_number(&display[1], ((h+23)%24)+1);
   }
 }
 
