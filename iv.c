@@ -577,6 +577,12 @@ static unsigned char show_num(unsigned char pos, unsigned char *v)
   return 2;
 }
 
+static unsigned char show_num_slz(unsigned char pos, unsigned char *v)
+{
+  emit_number_slz(&display[pos], *v);
+  return 2;
+}
+
 static unsigned char show_hour(unsigned char pos, unsigned char *v)
 {
   uint8_t h = *v;
@@ -610,6 +616,68 @@ static unsigned char show_ampm(unsigned char pos, unsigned char *v)
     return show_str(pos, (unsigned char *)" am");
 }
 
+static const char *dayofweek(const struct date *date)
+{
+    uint16_t month, year;
+    uint8_t dotw;
+
+    month = date->m;
+    year = 2000 + date->y;
+    if (month < 3)  {
+      month += 12;
+      year -= 1;
+    }
+
+    dotw = (date->d +
+	    (2 * month) +
+	    (6 * (month+1)/10) +
+	    year + (year/4) -
+	    (year/100) +
+	    (year/400) + 1) % 7;
+
+    switch (dotw) {
+    case 0:	return "sunday";
+    case 1:	return "monday";
+    case 2:	return "tuesday";
+    case 3:	return "wednsday";
+    case 4:	return "thursday";
+    case 5:	return "friday";
+    case 6:	return "saturday";
+    }
+    return "";
+}
+
+static unsigned char show_dayofweek(unsigned char pos, unsigned char *v)
+{
+  const struct date *date = (const struct date *)v;
+
+  return show_str(pos, (unsigned char *)dayofweek(date));
+}
+
+static const char *monthname(uint8_t month)
+{
+  switch (month) {
+  case 1:	return "jan";
+  case 2:	return "feb";
+  case 3:	return "march";
+  case 4:	return "april";
+  case 5:	return "may";
+  case 6:	return "june";
+  case 7:	return "july";
+  case 8:	return "augst";
+  case 9:	return "sept";
+  case 10:	return "octob";
+  case 11:	return "novem";
+  case 12:	return "decem";
+  }
+  return "";
+}
+
+static unsigned char show_monthname(unsigned char pos, unsigned char *v)
+{
+  return show_str(pos, (unsigned char *)monthname(*v));
+}
+  
 static void update_hour(unsigned char *v)
 {
   if (++*v >= 24)
@@ -722,6 +790,16 @@ static const struct field euro_date_fields[] PROGMEM = {
   { show_num, update_month, &menu_state.date.m },
   { show_str, NULL, (unsigned char *)"-" },
   { show_num, update_year, &menu_state.date.y },
+};
+
+static const struct field dotw_fields[] PROGMEM = {
+  { show_dayofweek, NULL, (unsigned char *)&menu_state.date },
+};
+
+static const struct field monthdate_fields[] PROGMEM = {
+  { show_monthname, NULL, &menu_state.date.m },
+  { show_str, NULL, (unsigned char *)" " },
+  { show_num_slz, NULL, &menu_state.date.d },
 };
 
 static const struct field brite_fields[] PROGMEM = {
@@ -962,6 +1040,26 @@ void display_alarm(void)
 {
   get_alarm();
   display_entry(-1);
+}
+
+// We can display the current date!
+static void display_date(uint8_t style)
+{
+  switch (style) {
+  case DATE:
+    get_date();
+    display_entry(-1);
+    break;
+
+  case DAY:
+    menu_state.date = timedate.date;
+    copy_fields(dotw_fields, NELEM(dotw_fields));
+    display_entry(-1);
+    delayms(1000);
+    copy_fields(monthdate_fields, NELEM(monthdate_fields));
+    display_entry(-1);
+    break;
+  }
 }
 
 void gotosleep(void) {
@@ -1372,95 +1470,6 @@ void boost_init(uint8_t brightness) {
 }
 
 /**************************** DISPLAY *****************************/
-
-// We can display the current date!
-void display_date(uint8_t style) {
-
-  // This type is mm-dd-yy OR dd-mm-yy depending on our pref.
-  if (style == DATE) {
-    display[0] = 0;
-    display[6] = display[3] = 0x02;     // put dashes between num
-
-    if (region == REGION_US) {
-      // mm-dd-yy
-      emit_number_slz(&display[1], timedate.date.m);
-      emit_number_slz(&display[4], timedate.date.d);
-    } else {
-      // dd-mm-yy
-      emit_number_slz(&display[1], timedate.date.d);
-      emit_number_slz(&display[4], timedate.date.m);
-    }
-    // the yy part is the same
-    emit_number(&display[7], timedate.date.y);
-  } else if (style == DAY) {
-    // This is more "Sunday June 21" style
-
-    uint16_t month, year;
-    uint8_t dotw;
-
-    // Calculate day of the week
-    
-    month = timedate.date.m;
-    year = 2000 + timedate.date.y;
-    if (timedate.date.m < 3)  {
-      month += 12;
-      year -= 1;
-    }
-    dotw = (timedate.date.d + (2 * month) + (6 * (month+1)/10) + year + (year/4) - (year/100) + (year/400) + 1) % 7;
-
-    // Display the day first
-    display[8] = display[7] = 0;
-    switch (dotw) {
-    case 0:
-      display_str("sunday"); break;
-    case 1:
-      display_str("monday"); break;
-    case 2:
-      display_str("tuesday"); break;
-    case 3:
-      display_str("wednsday"); break;
-    case 4:
-      display_str("thursday"); break;
-    case 5:
-      display_str("friday"); break;
-    case 6:
-      display_str("saturday"); break;
-    }
-    
-    // wait one seconds about
-    delayms(1000);
-
-    // Then display the month and date
-    display[6] = display[5] = display[4] = 0;
-    switch (timedate.date.m) {
-    case 1:
-      display_str("jan"); break;
-    case 2:
-      display_str("feb"); break;
-    case 3:
-      display_str("march"); break;
-    case 4:
-      display_str("april"); break;
-    case 5:
-      display_str("may"); break;
-    case 6:
-      display_str("june"); break;
-    case 7:
-      display_str("july"); break;
-    case 8:
-      display_str("augst"); break;
-    case 9:
-      display_str("sept"); break;
-    case 10:
-      display_str("octob"); break;
-    case 11:
-      display_str("novem"); break;
-    case 12:
-      display_str("decem"); break;
-    }
-    emit_number_slz(&display[7], timedate.date.d);
-  }
-}
 
 // display words (menus, prompts, etc)
 static void __display_str(uint8_t *disp, const char *s) {
