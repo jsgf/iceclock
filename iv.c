@@ -797,10 +797,12 @@ static void update_vol(unsigned char *v)
 
 static unsigned char show_region(unsigned char pos, unsigned char *v)
 {
+  const char *ret;
   if (*v == REGION_US)
-    return __display_str(display+pos, "usa-12hr");
+    ret = PSTR("usa-12hr");
   else
-    return __display_str(display+pos, "eur-24hr");
+    ret = PSTR("eur-24hr");
+  return show_str(pos, (unsigned char *)ret);
 }
 
 static unsigned char show_secmode(unsigned char pos, unsigned char *v)
