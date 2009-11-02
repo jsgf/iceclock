@@ -185,19 +185,26 @@ volatile uint8_t buttonholdcounter = 0;
 // This interrupt detects switches 1 and 3
 SIGNAL(SIG_PIN_CHANGE2) {
   // allow interrupts while we're doing this
+  PCMSK2 = 0;
   sei();
+  // kick the dog
+  kickthedog();
 
   if (! (PIND & _BV(BUTTON1))) {
     // button1 is pressed
     if (! (last_buttonstate & 0x1)) { // was not pressed before
       delayms(10);                    // debounce
       if (PIND & _BV(BUTTON1))        // filter out bounces
+      {
+        PCMSK2 = _BV(PCINT21) | _BV(PCINT20);
 	return;
+      }
       tick();                         // make a noise
       // check if we will snag this button press for snoozing
       if (alarming) {
 	// turn on snooze
 	setsnooze();
+	PCMSK2 = _BV(PCINT21) | _BV(PCINT20);
 	return;
       }
       last_buttonstate |= 0x1;
@@ -213,7 +220,10 @@ SIGNAL(SIG_PIN_CHANGE2) {
     if (! (last_buttonstate & 0x4)) { // was not pressed before
       delayms(10);                    // debounce
       if (PIND & _BV(BUTTON3))        // filter out bounces
+      {
+        PCMSK2 = _BV(PCINT21) | _BV(PCINT20);
 	return;
+      }
       buttonholdcounter = 2;          // see if we're press-and-holding
       while (buttonholdcounter) {
 	if (PIND & _BV(BUTTON3)) {        // released
@@ -223,10 +233,12 @@ SIGNAL(SIG_PIN_CHANGE2) {
 	  if (alarming) {
 	    // turn on snooze
 	    setsnooze();
+	    PCMSK2 = _BV(PCINT21) | _BV(PCINT20);
 	    return;
 	  }
 	  DEBUGP("b3");
 	  just_pressed |= 0x4;
+	  PCMSK2 = _BV(PCINT21) | _BV(PCINT20);
 	  return;
 	}
       }
@@ -237,22 +249,28 @@ SIGNAL(SIG_PIN_CHANGE2) {
     pressed = 0;                      // button released
     last_buttonstate &= ~0x4;
   }
+  PCMSK2 = _BV(PCINT21) | _BV(PCINT20);
 }
 
 // Just button #2
 SIGNAL(SIG_PIN_CHANGE0) {
+  PCMSK0 = 0;
   sei();
   if (! (PINB & _BV(BUTTON2))) {
     // button2 is pressed
     if (! (last_buttonstate & 0x2)) { // was not pressed before
       delayms(10);                    // debounce
       if (PINB & _BV(BUTTON2))        // filter out bounces
-	return;
+      {
+        PCMSK0 = _BV(PCINT0);
+         return;
+      }
       tick();                         // make a noise
       // check if we will snag this button press for snoozing
       if (alarming) {
-	setsnooze(); 	// turn on snooze
-	return;
+   setsnooze();    // turn on snooze
+  PCMSK0 = _BV(PCINT0);
+   return;
       }
       last_buttonstate |= 0x2;
       just_pressed |= 0x2;
@@ -261,6 +279,7 @@ SIGNAL(SIG_PIN_CHANGE0) {
   } else {
     last_buttonstate &= ~0x2;
   }
+  PCMSK0 = _BV(PCINT0);
 }
 
 // This variable keeps track of whether we have not pressed any
@@ -361,16 +380,21 @@ SIGNAL (TIMER2_OVF_vect) {
   }
 }
 
-SIGNAL(SIG_INTERRUPT0) {
+//Alarm Switch
+SIGNAL(SIG_INTERRUPT0) {  
+  EIMSK = 0;  //Disable this interrupt while we are processing it.
   uart_putchar('i');
   uint8_t x = ALARM_PIN & _BV(ALARM);
   sei();
   delayms(10); // wait for debouncing
   if (x != (ALARM_PIN & _BV(ALARM)))
+  {
+    EIMSK = _BV(INT0);
     return;
+  }
   setalarmstate();
+  EIMSK = _BV(INT0);  //And reenable it before exiting.
 }
-
 
 
 SIGNAL(SIG_COMPARATOR) {
