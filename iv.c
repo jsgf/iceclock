@@ -591,7 +591,7 @@ void gotosleep(void) {
   PORTC &= ~_BV(4);
 }
  
-void wakeup(void) {
+static void wakeup(void) {
    if (!sleepmode)
      return;
    CLKPR = _BV(CLKPCE);
