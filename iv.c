@@ -157,7 +157,7 @@ void setsnooze(void) {
 }
 
 // we reset the watchdog timer 
-void kickthedog(void) {
+static void kickthedog(void) {
   wdt_reset();
 }
 
@@ -349,9 +349,6 @@ SIGNAL (SIG_OVERFLOW0) {
   // allow other interrupts to go off while we're doing display updates
   sei();
 
-  // kick the dog
-  kickthedog();
-
   // divide down to 100Hz * digits
   muxdiv++;
   if (muxdiv < MUX_DIVIDER)
@@ -407,8 +404,6 @@ SIGNAL(SIG_PIN_CHANGE2) {
   // allow interrupts while we're doing this
   PCMSK2 = 0;
   sei();
-  // kick the dog
-  kickthedog();
 
   button_change_intr(0, !(PIND & _BV(BUTTON1)));
   button_change_intr(2, !(PIND & _BV(BUTTON3)));
@@ -1144,6 +1139,8 @@ static void show_entry(const struct entry *entry)
 
   changed = 1;
   while (input < nfields) {
+    kickthedog();
+
     if (changed) {
       display_entry(input);
       changed = 0;
@@ -1173,6 +1170,8 @@ static void show_menu(const struct entry *menu, int nentries)
   uint8_t changed = 1;
 
   while(entry < nentries) {
+    kickthedog();
+
     if (changed) {
       display_str(menu->prompt);
       changed = 0;
@@ -1396,9 +1395,7 @@ static void ui(void)
     if (button_sample(BUT_SET) || button_sample(BUT_NEXT)) {
       display_date(DAY);
 
-      kickthedog();
       delayms(1500);
-      kickthedog();
     } 
   }
 }
@@ -1489,8 +1486,8 @@ int main(void) {
 
   DEBUGP("done");
   while (1) {
-    //_delay_ms(100);
     kickthedog();
+
     //uart_putc_hex(ACSR);
     if (ACSR & _BV(ACO)) {
       // DEBUGP("SLEEPYTIME");
