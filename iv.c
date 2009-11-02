@@ -1,6 +1,7 @@
 /***************************************************************************
  Ice Tube Clock firmware August 13, 2009
  (c) 2009 Limor Fried / Adafruit Industries
+ (c) 2009 Jeremy Fitzhardinge <jeremy@goop.org>
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
