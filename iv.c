@@ -36,6 +36,14 @@ THE SOFTWARE.
 
 uint8_t region = REGION_US;
 
+/*
+ * Barrier to force compiler to make sure memory is up-to-date.  This
+ * is preferable to using "volatile" because we can just resync with
+ * memory when it really matters, rather than forcing the compiler to
+ * do a pile of memory load/stores.
+ */
+#define barrier()	asm volatile("" : : : "memory")
+
 struct timedate {
   uint8_t time_s, time_m, time_h;
   uint8_t date_m, date_d, date_y;
