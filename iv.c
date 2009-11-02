@@ -198,6 +198,9 @@ SIGNAL (SIG_OVERFLOW0) {
   
 }
 
+#define BUT_MENU	(1<<0)
+#define BUT_SET		(1<<1)
+#define BUT_NEXT	(1<<2)
 
 // We use the pin change interrupts to detect when buttons are pressed
 
@@ -217,7 +220,7 @@ SIGNAL(SIG_PIN_CHANGE2) {
 
   if (! (PIND & _BV(BUTTON1))) {
     // button1 is pressed
-    if (! (last_buttonstate & 0x1)) { // was not pressed before
+    if (! (last_buttonstate & BUT_MENU)) { // was not pressed before
       delayms(10);                    // debounce
       if (PIND & _BV(BUTTON1))        // filter out bounces
 	goto out;
@@ -228,17 +231,17 @@ SIGNAL(SIG_PIN_CHANGE2) {
 	setsnooze();
 	goto out;
       }
-      last_buttonstate |= 0x1;
-      just_pressed |= 0x1;
+      last_buttonstate |= BUT_MENU;
+      just_pressed |= BUT_MENU;
       DEBUGP("b1");
     }
   } else {
-    last_buttonstate &= ~0x1;
+    last_buttonstate &= ~BUT_MENU;
   }
 
   if (! (PIND & _BV(BUTTON3))) {
     // button3 is pressed
-    if (! (last_buttonstate & 0x4)) { // was not pressed before
+    if (! (last_buttonstate & BUT_NEXT)) { // was not pressed before
       delayms(10);                    // debounce
       if (PIND & _BV(BUTTON3))        // filter out bounces
 	goto out;
@@ -246,7 +249,7 @@ SIGNAL(SIG_PIN_CHANGE2) {
       while (buttonholdcounter) {
 	if (PIND & _BV(BUTTON3)) {        // released
 	  tick();                         // make a noise
-	  last_buttonstate &= ~0x4;
+	  last_buttonstate &= ~BUT_NEXT;
 	  // check if we will snag this button press for snoozing
 	  if (alarming) {
 	    // turn on snooze
@@ -254,16 +257,16 @@ SIGNAL(SIG_PIN_CHANGE2) {
 	    goto out;
 	  }
 	  DEBUGP("b3");
-	  just_pressed |= 0x4;
+	  just_pressed |= BUT_NEXT;
 	  goto out;
 	}
       }
-      last_buttonstate |= 0x4;
-      pressed |= 0x4;                 // held down
+      last_buttonstate |= BUT_NEXT;
+      pressed |= BUT_NEXT;                 // held down
     }
   } else {
     pressed = 0;                      // button released
-    last_buttonstate &= ~0x4;
+    last_buttonstate &= ~BUT_NEXT;
   }
 out:
   PCMSK2 = _BV(PCINT21) | _BV(PCINT20);
@@ -275,7 +278,7 @@ SIGNAL(SIG_PIN_CHANGE0) {
   sei();
   if (! (PINB & _BV(BUTTON2))) {
     // button2 is pressed
-    if (! (last_buttonstate & 0x2)) { // was not pressed before
+    if (! (last_buttonstate & BUT_SET)) { // was not pressed before
       delayms(10);                    // debounce
       if (PINB & _BV(BUTTON2))        // filter out bounces
 	goto out;
@@ -285,12 +288,12 @@ SIGNAL(SIG_PIN_CHANGE0) {
 	setsnooze();    // turn on snooze
 	goto out;
       }
-      last_buttonstate |= 0x2;
-      just_pressed |= 0x2;
+      last_buttonstate |= BUT_SET;
+      just_pressed |= BUT_SET;
       DEBUGP("b2");
     }
   } else {
-    last_buttonstate &= ~0x2;
+    last_buttonstate &= ~BUT_SET;
   }
 out:
   PCMSK0 = _BV(PCINT0);
@@ -643,7 +646,7 @@ int main(void) {
       continue;
     }
     //DEBUGP(".");
-    if (just_pressed & 0x1) {
+    if (just_pressed & BUT_MENU) {
       just_pressed = 0;
       switch(displaymode) {
       case (SHOW_TIME):
@@ -687,7 +690,7 @@ int main(void) {
       default:
 	displaymode = SHOW_TIME;
       }
-    } else if ((just_pressed & 0x2) || (just_pressed & 0x4)) {
+    } else if ((just_pressed & BUT_SET) || (just_pressed & BUT_NEXT)) {
       just_pressed = 0;
       displaymode = NONE;
       display_date(DAY);
@@ -718,7 +721,7 @@ void set_alarm(void)
   timeoutcounter = INACTIVITYTIMEOUT;
   
   while (1) {
-    if (just_pressed & 0x1) { // mode change
+    if (just_pressed & BUT_MENU) { // mode change
       return;
     }
     if (just_pressed || pressed) {
@@ -733,7 +736,7 @@ void set_alarm(void)
       eeprom_write_byte((uint8_t *)EE_ALARM_MIN, alarm_m);    
       return;
     }
-    if (just_pressed & 0x2) {
+    if (just_pressed & BUT_SET) {
       just_pressed = 0;
       if (mode == SHOW_MENU) {
 	// ok now its selected
@@ -756,7 +759,7 @@ void set_alarm(void)
 	return;
       }
     }
-    if ((just_pressed & 0x4) || (pressed & 0x4)) {
+    if ((just_pressed & BUT_NEXT) || (pressed & BUT_NEXT)) {
       just_pressed = 0;
 
       if (mode == SET_HOUR) {
@@ -772,7 +775,7 @@ void set_alarm(void)
 	display[5] |= 0x1;
       }
 
-      if (pressed & 0x4)
+      if (pressed & BUT_NEXT)
 	delayms(75);
     }
   }
@@ -791,7 +794,7 @@ void set_time(void)
   timeoutcounter = INACTIVITYTIMEOUT;
   
   while (1) {
-    if (just_pressed & 0x1) { // mode change
+    if (just_pressed & BUT_MENU) { // mode change
       return;
     }
     if (just_pressed || pressed) {
@@ -802,7 +805,7 @@ void set_time(void)
       displaymode = SHOW_TIME;     
       return;
     }
-    if (just_pressed & 0x2) {
+    if (just_pressed & BUT_SET) {
       just_pressed = 0;
       if (mode == SHOW_MENU) {
 	hour = timedate.time_h;
@@ -833,7 +836,7 @@ void set_time(void)
 	return;
       }
     }
-    if ((just_pressed & 0x4) || (pressed & 0x4)) {
+    if ((just_pressed & BUT_NEXT) || (pressed & BUT_NEXT)) {
       just_pressed = 0;
       
       if (mode == SET_HOUR) {
@@ -860,7 +863,7 @@ void set_time(void)
 	timedate.time_s = sec;
       }
       
-      if (pressed & 0x4)
+      if (pressed & BUT_NEXT)
 	delayms(75);
     }
   }
@@ -882,10 +885,10 @@ void set_date(void) {
       displaymode = SHOW_TIME;     
       return;
     }
-    if (just_pressed & 0x1) { // mode change
+    if (just_pressed & BUT_MENU) { // mode change
       return;
     }
-    if (just_pressed & 0x2) {
+    if (just_pressed & BUT_SET) {
 
       just_pressed = 0;
       if (mode == SHOW_MENU) {
@@ -923,7 +926,7 @@ void set_date(void) {
 	return;
       }
     }
-    if ((just_pressed & 0x4) || (pressed & 0x4)) {
+    if ((just_pressed & BUT_NEXT) || (pressed & BUT_NEXT)) {
       just_pressed = 0;
       if (mode == SET_MONTH) {
 	timedate.date_m++;
@@ -963,7 +966,7 @@ void set_date(void) {
 	eeprom_write_byte((uint8_t *)EE_YEAR, timedate.date_y);    
       }
 
-      if (pressed & 0x4)
+      if (pressed & BUT_NEXT)
 	delayms(60);
     }
   }
@@ -1015,10 +1018,10 @@ void set_brightness(void) {
       eeprom_write_byte((uint8_t *)EE_BRIGHT, brightness);
       return;
     }
-    if (just_pressed & 0x1) { // mode change
+    if (just_pressed & BUT_MENU) { // mode change
       return;
     }
-    if (just_pressed & 0x2) {
+    if (just_pressed & BUT_SET) {
 
       just_pressed = 0;
       if (mode == SHOW_MENU) {
@@ -1033,7 +1036,7 @@ void set_brightness(void) {
 	return;
       }
     }
-    if ((just_pressed & 0x4) || (pressed & 0x4)) {
+    if ((just_pressed & BUT_NEXT) || (pressed & BUT_NEXT)) {
       just_pressed = 0;
       if (mode == SET_BRITE) {
 	brightness += 5;
@@ -1064,10 +1067,10 @@ void set_volume(void) {
       displaymode = SHOW_TIME;     
       return;
     }
-    if (just_pressed & 0x1) { // mode change
+    if (just_pressed & BUT_MENU) { // mode change
       return;
     }
-    if (just_pressed & 0x2) {
+    if (just_pressed & BUT_SET) {
       just_pressed = 0;
       if (mode == SHOW_MENU) {
 	// start!
@@ -1087,7 +1090,7 @@ void set_volume(void) {
 	return;
       }
     }
-    if (just_pressed & 0x4) {
+    if (just_pressed & BUT_NEXT) {
       just_pressed = 0;
       if (mode == SET_VOL) {
 	volume = !volume;
@@ -1126,10 +1129,10 @@ void set_region(void) {
       displaymode = SHOW_TIME;     
       return;
     }
-    if (just_pressed & 0x1) { // mode change
+    if (just_pressed & BUT_MENU) { // mode change
       return;
     }
-    if (just_pressed & 0x2) {
+    if (just_pressed & BUT_SET) {
       just_pressed = 0;
       if (mode == SHOW_MENU) {
 	// start!
@@ -1145,7 +1148,7 @@ void set_region(void) {
 	return;
       }
     }
-    if (just_pressed & 0x4) {
+    if (just_pressed & BUT_NEXT) {
       just_pressed = 0;
       if (mode == SET_REG) {
 	region = !region;
@@ -1178,10 +1181,10 @@ void set_snooze(void) {
       displaymode = SHOW_TIME;     
       return;
     }
-    if (just_pressed & 0x1) { // mode change
+    if (just_pressed & BUT_MENU) { // mode change
       return;
     }
-    if (just_pressed & 0x2) {
+    if (just_pressed & BUT_SET) {
 
       just_pressed = 0;
       if (mode == SHOW_MENU) {
@@ -1196,7 +1199,7 @@ void set_snooze(void) {
 	return;
       }
     }
-    if ((just_pressed & 0x4) || (pressed & 0x4)) {
+    if ((just_pressed & BUT_NEXT) || (pressed & BUT_NEXT)) {
       just_pressed = 0;
       if (mode == SET_SNOOZE) {
         snooze ++;
@@ -1207,7 +1210,7 @@ void set_snooze(void) {
 	eeprom_write_byte((uint8_t *)EE_SNOOZE, snooze);
       }
 
-      if (pressed & 0x4)
+      if (pressed & BUT_NEXT)
 	delayms(75);
 
     }
