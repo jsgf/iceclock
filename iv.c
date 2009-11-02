@@ -91,14 +91,23 @@ uint16_t alarmdiv = 0;
 // How long we have been snoozing
 uint16_t snoozetimer = 0;
 
+static inline void sleep(void)
+{
+  asm volatile("sleep" : : : "memory");
+}
+
 // We have a non-blocking delay function, milliseconds is updated by
 // an interrupt
 volatile uint16_t milliseconds = 0;
 void delayms(uint16_t ms) {
-  sei();
-
   milliseconds = 0;
-  while (milliseconds < ms);
+  cli();
+  while (milliseconds < ms) {
+    sei();
+    sleep();
+    cli();
+  }
+  sei();
 }
 
 // When the alarm is going off, pressing a button turns on snooze mode
@@ -457,8 +466,7 @@ void gotosleep(void) {
   
   //  PPR |= _BV(PRUSART0) | _BV(PRADC) | _BV(PRSPI) | _BV(PRTIM1) | _BV(PRTIM0) | _BV(PRTWI);
   PORTC |= _BV(4);  // sleep signal
-  SMCR |= _BV(SM1) | _BV(SM0) | _BV(SE); // sleep mode
-  asm("sleep"); 
+  sleep();
   CLKPR = _BV(CLKPCE);
   CLKPR = 0;
   PORTC &= ~_BV(4);
@@ -532,6 +540,8 @@ int main(void) {
   // check if we were reset
   mcustate = MCUSR;
   MCUSR = 0;
+
+  SMCR |= _BV(SM1) | _BV(SM0) | _BV(SE); // sleep mode
 
   wdt_disable();
   // now turn it back on... 2 second time out
