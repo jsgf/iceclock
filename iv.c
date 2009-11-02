@@ -972,6 +972,8 @@ void set_date(void) {
   uint8_t mode = SHOW_MENU;
 
   while (1) {
+    uint8_t highlight = 0;
+
     if (button_timeout()) {
       //timed out!
       displaymode = SHOW_TIME;     
@@ -991,24 +993,18 @@ void set_date(void) {
 	  DEBUGP("Set day");
 	  mode = SET_DAY;
 	}
-	display_date(DATE);
-	display[1] |= 0x1;
-	display[2] |= 0x1;
+	highlight = 1;
       } else if (((mode == SET_MONTH) && (region == REGION_US)) ||
 		 ((mode == SET_DAY) && (region == REGION_EU))) {
 	if (region == REGION_US)
 	  mode = SET_DAY;
 	else
 	  mode = SET_MONTH;
-	display_date(DATE);
-	display[4] |= 0x1;
-	display[5] |= 0x1;
+	highlight = 4;
       } else if (((mode == SET_DAY) && (region == REGION_US)) ||
-	((mode == SET_MONTH) && (region == REGION_EU))) {
+		 ((mode == SET_MONTH) && (region == REGION_EU))) {
 	mode = SET_YEAR;
-	display_date(DATE);
-	display[7] |= 0x1;
-	display[8] |= 0x1;
+	highlight = 7;
       } else {
 	displaymode = NONE;
 	display_date(DATE);
@@ -1019,43 +1015,48 @@ void set_date(void) {
     }
 
     if (button_sample(BUT_NEXT)) {
-      if (mode == SET_MONTH) {
+      switch (mode) {
+      case SET_MONTH:
 	timedate.date_m++;
 	if (timedate.date_m >= 13)
 	  timedate.date_m = 1;
 	display_date(DATE);
 	if (region == REGION_US) {
-	  display[1] |= 0x1;
-	  display[2] |= 0x1;
+	  highlight = 1;
 	} else {
-	  display[4] |= 0x1;
-	  display[5] |= 0x1;
+	  highlight = 4;
 	}
 	eeprom_write_byte((uint8_t *)EE_MONTH, timedate.date_m);    
-      }
-      if (mode == SET_DAY) {
+	break;
+
+      case SET_DAY:
 	timedate.date_d++;
 	if (timedate.date_d > 31)
 	  timedate.date_d = 1;
 	display_date(DATE);
 
 	if (region == REGION_EU) {
-	  display[1] |= 0x1;
-	  display[2] |= 0x1;
+	  highlight = 1;
 	} else {
-	  display[4] |= 0x1;
-	  display[5] |= 0x1;
+	  highlight = 4;
 	}
 	eeprom_write_byte((uint8_t *)EE_DAY, timedate.date_d);    
-      }
-      if (mode == SET_YEAR) {
+	break;
+
+      case SET_YEAR:
 	timedate.date_y++;
 	timedate.date_y %= 100;
-	display_date(DATE);
-	display[7] |= 0x1;
-	display[8] |= 0x1;
+	highlight = 7;
 	eeprom_write_byte((uint8_t *)EE_YEAR, timedate.date_y);    
+	break;
       }
+    }
+
+    if (highlight && mode != SHOW_MENU) {
+      display_date(DATE);
+      
+      display[highlight+0] |= 0x1;
+      display[highlight+1] |= 0x1;
     }
   }
 }
