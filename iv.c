@@ -1278,13 +1278,14 @@ static void ui(void)
 
   if (timeunknown && (timedate.time.s % 2))
     display_str("        ");
-  else
+  else {
     display_time();
 
-  if (alarm_on)
-    display[0] |= 0x2;
-  else 
-    display[0] &= ~0x2;
+    if (alarm_on)
+      display[0] |= 0x2;
+    else 
+      display[0] &= ~0x2;
+  }
 
   if (alarming) {
     /* While alarming, any button-press will kick off snooze */
