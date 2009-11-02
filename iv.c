@@ -45,7 +45,7 @@ uint8_t region = REGION_US;
  */
 #define barrier()	asm volatile("" : : : "memory")
 
-static void __display_str(uint8_t *disp, const char *s);
+static unsigned char __display_str(uint8_t *disp, const char *s);
 
 struct timedate {
   struct time {
@@ -588,21 +588,20 @@ static unsigned char show_hour(unsigned char pos, unsigned char *v)
   uint8_t h = *v;
 
   if (region == REGION_US) {
-    emit_number_slz(&display[pos], ((h+11) % 12) + 1);
+    emit_number_slz(display+pos, ((h+11) % 12) + 1);
     if (h >= 12)
       display[0] |= 0x1;	/* pm notice */
     else
       display[0] &= ~0x1;	/* am */
   } else
-    emit_number(&display[pos], h);
+    emit_number(display+pos, h);
   return 2;
 }
 
 static unsigned char show_str(unsigned char pos, unsigned char *v)
 {
   char *c = (char *)v;
-  __display_str(display+pos, c);
-  return strlen(c);
+  return __display_str(display+pos, c);
 }
 
 static unsigned char show_ampm(unsigned char pos, unsigned char *v)
@@ -728,11 +727,9 @@ static void update_brite(unsigned char *v)
 static unsigned char show_vol(unsigned char pos, unsigned char *v)
 {
   if (*v)
-    __display_str(display+pos, "high");
+    return __display_str(display+pos, "high");
   else
-    __display_str(display+pos, " low");
-
-  return 4;
+    return __display_str(display+pos, " low");
 }
 
 static void update_toggle(unsigned char *v)
@@ -743,11 +740,9 @@ static void update_toggle(unsigned char *v)
 static unsigned char show_region(unsigned char pos, unsigned char *v)
 {
   if (*v == REGION_US)
-    __display_str(display+pos, "usa-12hr");
+    return __display_str(display+pos, "usa-12hr");
   else
-    __display_str(display+pos, "eur-24hr");
-
-  return 8;
+    return __display_str(display+pos, "eur-24hr");
 }
 
 static struct menu_state {
@@ -1472,32 +1467,40 @@ void boost_init(uint8_t brightness) {
 /**************************** DISPLAY *****************************/
 
 // display words (menus, prompts, etc)
-static void __display_str(uint8_t *disp, const char *s) {
-  uint8_t i;
+static unsigned char __display_str(uint8_t *disp, const char *s)
+{
+  unsigned char len = 0;
 
-  // up to 8 characters
-  for (i=1; i<9; i++, disp++) {
-    // check for null-termination
-    if (s[i-1] == 0)
-      return;
+  while(disp < (display+DISPLAYSIZE) && *s) {
+    char c = *s;
 
     // Numbers and leters are looked up in the font table!
-    if ((s[i-1] >= 'a') && (s[i-1] <= 'z')) {
-      *disp =  pgm_read_byte(alphatable + s[i-1] - 'a');
-    } else if ((s[i-1] >= '0') && (s[i-1] <= '9')) {
-      *disp =  pgm_read_byte(numbertable + s[i-1] - '0');
+    if ((c >= 'a') && (c <= 'z')) {
+      *disp =  pgm_read_byte(alphatable + c - 'a');
+    } else if ((c >= '0') && (c <= '9')) {
+      *disp =  pgm_read_byte(numbertable + c - '0');
     } else {
       *disp = 0;      // spaces and other stuff are ignored :(
     }
+
+    disp++;
+    s++;
+    len++;
   }
+
+  return len;
 }
 
 void display_str(const char *s)
 {
+  uint8_t i, len;
+
   // don't use the lefthand dot/slash digit
   display[0] = 0;
 
-  __display_str(display+1, s);
+  len = __display_str(display+1, s);
+  for (i = len+1; i < DISPLAYSIZE; i++)
+    display[i] = 0;
 }
 
 /************************* LOW LEVEL DISPLAY ************************/
