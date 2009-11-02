@@ -950,6 +950,13 @@ static void show_menu(const struct entry *menu, int nentries)
   }
 }
 
+// This displays a time on the clock
+static void display_time(void)
+{
+  get_time();
+  display_entry(-1);
+}
+
 void gotosleep(void) {
   // battery
   //if (sleepmode) //already asleep?
@@ -1158,7 +1165,7 @@ int main(void) {
     if (timeunknown && (timedate.time.s % 2))
       display_str("        ");
     else
-      display_time(timedate.time.h, timedate.time.m, timedate.time.s);
+      display_time();
     
     /* snoozetimer == 0 if we're not alarming */
     if (alarm_on && (snoozetimer % 2) == 0)
@@ -1445,29 +1452,6 @@ void display_date(uint8_t style) {
       display_str("decem"); break;
     }
     emit_number_slz(&display[7], timedate.date.d);
-  }
-}
-
-// This displays a time on the clock
-void display_time(uint8_t h, uint8_t m, uint8_t s) {
-  
-  // seconds and minutes are at the end
-  emit_number(&display[7], s);
-  display[6] = 0;
-  emit_number(&display[4], m);
-  display[3] = 0;
-
-  // check euro (24h) or US (12h) style time
-  if (region == REGION_US) {
-    emit_number_slz(&display[1], ((h+11)%12)+1);
-
-    // We use the '*' as an am/pm notice
-    if (h >= 12)
-      display[0] |= 0x1;  // 'pm' notice
-    else 
-      display[0] &= ~0x1;  // 'pm' notice
-  } else {
-    emit_number(&display[1], h%24);
   }
 }
 
