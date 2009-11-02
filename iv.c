@@ -58,6 +58,7 @@ struct timedate {
 
 // These variables store the current time and date.
 struct timedate timedate;
+static volatile uint8_t suspend_update; /* if set, don't update */
 
 // how loud is the speaker supposed to be?
 uint8_t volume;
@@ -421,6 +422,51 @@ SIGNAL(SIG_PIN_CHANGE0) {
   PCMSK0 = _BV(PCINT0);
 }
 
+static void increment_time(struct timedate *td)
+{
+  td->time.s++;             // one second has gone by
+
+  // a minute!
+  if (td->time.s >= 60) {
+    td->time.s = 0;
+    td->time.m++;
+  }
+
+  // an hour...
+  if (td->time.m >= 60) {
+    td->time.m = 0;
+    td->time.h++; 
+    // lets write the time to the EEPROM
+    eeprom_write_byte((uint8_t *)EE_HOUR, td->time.h);
+    eeprom_write_byte((uint8_t *)EE_MIN, td->time.m);
+  }
+
+  // a day....
+  if (td->time.h >= 24) {
+    td->time.h = 0;
+    td->date.d++;
+    eeprom_write_byte((uint8_t *)EE_DAY, td->date.d);
+  }
+
+  // a full month!
+  // we check the leapyear and date to verify when its time to roll over months
+  if ((td->date.d > 31) ||
+      ((td->date.d == 31) && ((td->date.m == 4)||(td->date.m == 6)||(td->date.m == 9)||(td->date.m == 11))) ||
+      ((td->date.d == 30) && (td->date.m == 2)) ||
+      ((td->date.d == 29) && (td->date.m == 2) && !leapyear(2000+td->date.y))) {
+    td->date.d = 1;
+    td->date.m++;
+    eeprom_write_byte((uint8_t *)EE_MONTH, td->date.m);
+  }
+  
+  // HAPPY NEW YEAR!
+  if (td->date.m >= 13) {
+    td->date.y++;
+    td->date.m = 1;
+    eeprom_write_byte((uint8_t *)EE_YEAR, td->date.y);
+  }
+}
+
 /*
  * This goes off once a second, driven by the external 32.768kHz
  * crystal.  It leaves interrupts disabled so it can never itself be
@@ -433,60 +479,10 @@ SIGNAL (TIMER2_OVF_vect) {
 
   td = timedate;
 
-  td.time.s++;             // one second has gone by
-
-  // a minute!
-  if (td.time.s >= 60) {
-    td.time.s = 0;
-    td.time.m++;
+  if (!suspend_update) {
+    increment_time(&td);
+    timedate = td;
   }
-
-  // an hour...
-  if (td.time.m >= 60) {
-    td.time.m = 0;
-    td.time.h++; 
-    // lets write the time to the EEPROM
-    eeprom_write_byte((uint8_t *)EE_HOUR, td.time.h);
-    eeprom_write_byte((uint8_t *)EE_MIN, td.time.m);
-  }
-
-  // a day....
-  if (td.time.h >= 24) {
-    td.time.h = 0;
-    td.date.d++;
-    eeprom_write_byte((uint8_t *)EE_DAY, td.date.d);
-  }
-
-  /*
-  if (! sleepmode) {
-    uart_putw_dec(time_h);
-    uart_putchar(':');
-    uart_putw_dec(time_m);
-    uart_putchar(':');
-    uart_putw_dec(time_s);
-    putstring_nl("");
-  }
-  */
-
-  // a full month!
-  // we check the leapyear and date to verify when its time to roll over months
-  if ((td.date.d > 31) ||
-      ((td.date.d == 31) && ((td.date.m == 4)||(td.date.m == 6)||(td.date.m == 9)||(td.date.m == 11))) ||
-      ((td.date.d == 30) && (td.date.m == 2)) ||
-      ((td.date.d == 29) && (td.date.m == 2) && !leapyear(2000+td.date.y))) {
-    td.date.d = 1;
-    td.date.m++;
-    eeprom_write_byte((uint8_t *)EE_MONTH, td.date.m);
-  }
-  
-  // HAPPY NEW YEAR!
-  if (td.date.m >= 13) {
-    td.date.y++;
-    td.date.m = 1;
-    eeprom_write_byte((uint8_t *)EE_YEAR, td.date.y);
-  }
-  
-  timedate = td;
 
   // If we're in low power mode we should get out now since the display is off
   if (sleepmode)
@@ -858,11 +854,11 @@ static const struct field time_fields[] PROGMEM = {
 };
 
 static const struct field timeset_fields[] PROGMEM = {
-  { show_hour, update_hour, &menu_state.time.h },
+  { show_hour, update_hour, &timedate.time.h },
   SPACE,
-  { show_num, update_mod60, &menu_state.time.m },
+  { show_num, update_mod60, &timedate.time.m },
   SPACE,
-  { show_num, update_mod60, (unsigned char *)&menu_state.time.s },
+  { show_num, update_mod60, &timedate.time.s },
 };
 
 static const struct field us_date_fields[] PROGMEM = {
@@ -933,24 +929,19 @@ static void store_alarm(void)
 
 static void get_time(void)
 {
+  suspend_update = 1;
   copy_fields(timeset_fields, NELEM(timeset_fields));
   barrier();
-  menu_state.time = timedate.time;
 }
 
 static void store_time(void)
 {
-  /* disable interrupts to make sure timedate gets updated atomically
-   * (we're resetting time, so it doesn't matter if we hold off
-   * time-update for a little while) */
-  cli();
-  timedate.time = menu_state.time;
-  sei();
-
   timeunknown = 0;
 
-  eeprom_write_byte((uint8_t *)EE_HOUR, menu_state.time.h);
-  eeprom_write_byte((uint8_t *)EE_MIN, menu_state.time.m);
+  eeprom_write_byte((uint8_t *)EE_HOUR, timedate.time.h);
+  eeprom_write_byte((uint8_t *)EE_MIN, timedate.time.m);
+
+  suspend_update = 0;
 }
 
 static void get_date(void)
