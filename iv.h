@@ -177,4 +177,4 @@ void spi_xfer(uint8_t c);
 #define DIG_8 7
 #define DIG_9 3
 
-#define nop asm("nop")
+
