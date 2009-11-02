@@ -1384,8 +1384,8 @@ int main(void) {
     else
       display_time();
     
-    /* snoozetimer == 0 if we're not alarming */
-    if (alarm_on && (snoozetimer % 2) == 0)
+    /* blink indicator when alarming, regardless of snooze */
+    if (alarm_on && (!alarming || timedate.time.s % 2))
       display[0] |= 0x2;
     else 
       display[0] &= ~0x2;
