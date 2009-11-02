@@ -27,6 +27,9 @@ THE SOFTWARE.
 #define DEBUG 1
 #define DEBUGP(x)  if (DEBUG) {putstring_nl(x);}
 
+#define BRITE_MIN	30
+#define BRITE_MAX	90
+#define BRITE_STEP	5
 
 #define REGION_US 0
 #define REGION_EU 1
@@ -70,7 +73,7 @@ void delay(uint16_t delay);
 void (*app_start)(void) = 0x0000;
 
 void initbuttons(void);
-void boost_init(uint8_t pwm);
+void boost_init(void);
 void vfd_init(void);
 void speaker_init(void);
 

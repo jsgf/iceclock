@@ -63,6 +63,9 @@ static volatile uint8_t suspend_update; /* if set, don't update */
 // how loud is the speaker supposed to be?
 uint8_t volume;
 
+// display brightness
+static uint8_t brightness;
+
 // whether the alarm is on, going off, and alarm time
 static uint8_t alarm_on, alarming;
 struct time alarm;
@@ -467,6 +470,34 @@ static void increment_time(struct timedate *td)
   }
 }
 
+static void load_brite(void)
+{
+  brightness = eeprom_read_byte((unsigned char *)EE_BRIGHT);
+  if (brightness < BRITE_MIN || brightness > BRITE_MAX)
+    brightness = BRITE_MIN;
+}
+
+static void save_brite(void)
+{
+  eeprom_write_byte((unsigned char *)EE_BRIGHT, brightness);
+}
+
+static void set_brite(void)
+{
+  uint8_t b;
+
+  if (alarming)
+    b = (timedate.time.s % 2) ? BRITE_MIN : BRITE_MAX;
+  else
+    b = brightness;
+
+  /* safety */
+  if (b < BRITE_MIN || b > BRITE_MAX)
+    b = BRITE_MIN;
+
+  OCR0A = b;
+}
+
 /*
  * This goes off once a second, driven by the external 32.768kHz
  * crystal.  It leaves interrupts disabled so it can never itself be
@@ -493,6 +524,10 @@ SIGNAL (TIMER2_OVF_vect) {
     alarming = 1;
     snoozetimer = 0;
   }
+
+  /* blink display from interrupt */
+  if (alarming)
+    set_brite();
 
   if (snoozetimer)
     snoozetimer--;
@@ -751,10 +786,6 @@ static void update_year(unsigned char *v)
     *v = 0;
 }
 
-#define BRITE_MIN	30
-#define BRITE_MAX	90
-#define BRITE_STEP	5
-
 static void update_brite(unsigned char *v)
 {
   unsigned char new = *v;
@@ -890,7 +921,7 @@ static const struct field monthdate_fields[] PROGMEM = {
 static unsigned char brite_P[] PROGMEM = "brite ";
 static const struct field brite_fields[] PROGMEM = {
   { show_str, NULL, brite_P },
-  { show_num, update_brite, &menu_state.val },
+  { show_num, update_brite, &brightness },
 };
 
 static unsigned char vol_P[] PROGMEM = "vol ";
@@ -963,12 +994,11 @@ static void store_date(void)
 static void get_brite(void)
 {
   copy_fields(brite_fields, NELEM(brite_fields));
-  menu_state.val = eeprom_read_byte((uint8_t *)EE_BRIGHT);
 }
 
 static void store_brite(void)
 {
-  eeprom_write_byte((uint8_t *)EE_BRIGHT, menu_state.val);
+  save_brite();
 }
 
 static void get_vol(void)
@@ -1239,7 +1269,7 @@ static void wakeup(void) {
    initbuttons();
 
    // turn on boost
-   boost_init(eeprom_read_byte((uint8_t *)EE_BRIGHT));
+   boost_init();
 
    // turn on vfd control
    vfd_init();
@@ -1296,18 +1326,6 @@ static void ui(void)
       display[0] &= ~0x2;
   }
 
-  if (alarming) {
-    /* flash display brightness while alarming (even while snoozing) */
-    if (timedate.time.s % 2)
-      OCR0A = BRITE_MAX;
-    else
-      OCR0A = BRITE_MIN;
-
-  } else {
-    /* No alarm, normal brightness and button operation */
-    OCR0A = eeprom_read_byte((uint8_t *)EE_BRIGHT);
-  }
-
   if (alarming && !snoozetimer) {
     /* While alarming, any button-press will kick off snooze */
     if (button_sample(BUT_MENU) ||
@@ -1318,7 +1336,7 @@ static void ui(void)
     if (button_sample(BUT_MENU))
       show_menu(mainmenu, NELEM(mainmenu));
     
-    if (!alarming && (button_sample(BUT_SET) || button_sample(BUT_NEXT))) {
+    if (button_sample(BUT_SET) || button_sample(BUT_NEXT)) {
       display_date(DAY);
 
       kickthedog();
@@ -1388,11 +1406,13 @@ int main(void) {
     EICRA = _BV(ISC00);
     EIMSK = _BV(INT0);
   
+    load_brite();
+
     DEBUGP("vfd init");
     vfd_init();
     
     DEBUGP("boost init");
-    boost_init(eeprom_read_byte((uint8_t *)EE_BRIGHT));
+    boost_init();
     sei();
 
     region = eeprom_read_byte((uint8_t *)EE_REGION);
@@ -1460,6 +1480,10 @@ void setalarmstate(void) {
       // and quiet the speaker
       DEBUGP("alarm off");
       alarming = 0;
+
+      /* No alarm, normal brightness */
+      set_brite();
+
       TCCR1B &= ~_BV(CS11); // turn it off!
       PORTB |= _BV(SPK1) | _BV(SPK2);
     } 
@@ -1538,18 +1562,7 @@ void beep(uint16_t freq, uint8_t times) {
 
 // We control the boost converter by changing the PWM output
 // pins
-void boost_init(uint8_t brightness) {
-  // Set PWM value, don't set it so high that
-  // we could damage the MAX chip or display
-  if (brightness > 90)
-    brightness = 90;
-
-  // Or so low its not visible
-  if (brightness < 30)
-    brightness = 30;
-
-  OCR0A = ((brightness + 4) / 5) * 5;
-
+void boost_init(void) {
   // fast PWM, set OC0A (boost output pin) on match
   TCCR0A = _BV(WGM00) | _BV(WGM01);  
 
@@ -1558,6 +1571,8 @@ void boost_init(uint8_t brightness) {
  
   TCCR0A |= _BV(COM0A1);
   TIMSK0 |= _BV(TOIE0); // turn on the interrupt for muxing
+
+  set_brite();
   sei();
 }
 
