@@ -1094,7 +1094,7 @@ static void store_snooze(void)
   eeprom_write_byte((uint8_t *)EE_SNOOZE, snooze);
 }
 
-static const struct entry mainmenu[] = {
+static const struct entry mainmenu[] PROGMEM = {
   { "set alarm", get_alarm, store_alarm },
   { "set snoz", get_snooze, store_snooze },
   { "set time", get_time, store_time },
@@ -1188,7 +1188,10 @@ static void show_menu(const struct entry *menu, int nentries)
   uint8_t entry = 0;
 
   while(entry < nentries) {
-    display_str(menu->prompt);
+    struct entry m;
+
+    memcpy_P(&m, menu, sizeof(m));
+    display_str(m.prompt);
 
     for (;;) {
       kickthedog();
@@ -1203,7 +1206,7 @@ static void show_menu(const struct entry *menu, int nentries)
       }
 
       if (button_sample(BUT_SET)) {
-	show_entry(menu);
+	show_entry(&m);
 	goto out;
       }
 
