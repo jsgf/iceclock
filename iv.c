@@ -1327,12 +1327,6 @@ static void ui(void)
   }
 
   if (alarming) {
-    /* While alarming, any button-press will kick off snooze */
-    if (button_sample(BUT_MENU) ||
-	button_sample(BUT_SET) ||
-	button_sample(BUT_NEXT))
-      setsnooze();
-
     /* flash display brightness while alarming (even while snoozing) */
     if (timedate.time.s % 2)
       OCR0A = BRITE_MAX;
@@ -1342,7 +1336,15 @@ static void ui(void)
   } else {
     /* No alarm, normal brightness and button operation */
     OCR0A = eeprom_read_byte((uint8_t *)EE_BRIGHT);
+  }
 
+  if (alarming && !snoozetimer) {
+    /* While alarming, any button-press will kick off snooze */
+    if (button_sample(BUT_MENU) ||
+	button_sample(BUT_SET) ||
+	button_sample(BUT_NEXT))
+      setsnooze();
+  } else {
     if (button_sample(BUT_MENU))
       show_menu(mainmenu, NELEM(mainmenu));
     
