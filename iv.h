@@ -93,37 +93,6 @@ void vfd_send(uint32_t d);
 void spi_xfer(uint8_t c);
 
 
-// displaymode
-#define NONE 99
-#define SHOW_TIME 0
-#define SHOW_DATE 1
-#define SHOW_ALARM 2
-#define SET_TIME 3
-#define SET_ALARM 4
-#define SET_DATE 5
-#define SET_BRIGHTNESS 6
-#define SET_VOLUME 7
-#define SET_REGION 8
-#define SHOW_SNOOZE 9
-#define SET_SNOOZE 10
-
-// sub-mode settings
-#define SHOW_MENU 0
-// alarm/time
-#define SET_HOUR 1
-#define SET_MIN 2
-#define SET_SEC 3
-// date
-#define SET_MONTH 1
-#define SET_DAY 2
-#define SET_YEAR 3
-//brightness
-#define SET_BRITE 1
-//volume
-#define SET_VOL 1
-//region
-#define SET_REG 1
-
 #define BOOST PD6
 #define BOOST_DDR DDRD
 #define BOOST_PORT PORTD

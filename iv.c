@@ -66,9 +66,6 @@ uint8_t volume;
 static uint8_t alarm_on, alarming;
 struct time alarm;
 
-// what is being displayed on the screen? (eg time, date, menu...)
-volatile uint8_t displaymode;
-
 // are we in low power sleep mode?
 volatile uint8_t sleepmode = 0;
 
@@ -151,9 +148,7 @@ void setsnooze(void) {
   snoozetimer = MAXSNOOZE;
   DEBUGP("snooze");
   display_str("snoozing");
-  displaymode = SHOW_SNOOZE;
   delayms(1000);
-  displaymode = SHOW_TIME;
 }
 
 // we reset the watchdog timer 
@@ -932,10 +927,6 @@ static void show_menu(const struct entry *menu, int nentries)
 {
   uint8_t entry = 0;
   uint8_t changed = 1;
-  uint8_t prev = displaymode;
-
-  displaymode = SHOW_MENU;
-  barrier();
 
   while(entry < nentries) {
     if (changed) {
@@ -957,9 +948,6 @@ static void show_menu(const struct entry *menu, int nentries)
       break;
     }
   }
-
-  barrier();
-  displaymode = prev;
 }
 
 void gotosleep(void) {
@@ -1127,7 +1115,6 @@ int main(void) {
     EICRA = _BV(ISC00);
     EIMSK = _BV(INT0);
   
-    displaymode = SHOW_TIME;
     DEBUGP("vfd init");
     vfd_init();
     
@@ -1183,14 +1170,11 @@ int main(void) {
       show_menu(mainmenu, NELEM(mainmenu));
     
     if (button_sample(BUT_SET) || button_sample(BUT_NEXT)) {
-      displaymode = NONE;
       display_date(DAY);
 
       kickthedog();
       delayms(1500);
       kickthedog();
-
-      displaymode = SHOW_TIME;     
     } 
 
     /*
@@ -1258,13 +1242,11 @@ void setalarmstate(void) {
       // show the status on the VFD tube
       display_str("alarm on");
       // its not actually SHOW_SNOOZE but just anything but SHOW_TIME
-      displaymode = SHOW_SNOOZE;
       delayms(1000);
       // show the current alarm time set
       display_alarm(alarm.h, alarm.m);
       delayms(1000);
       // after a second, go back to clock mode
-      displaymode = SHOW_TIME;
   } else {
     if (alarming) {
       // if the alarm is going off, we should turn it off
