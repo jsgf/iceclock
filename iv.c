@@ -829,6 +829,8 @@ void set_alarm(void)
   sec = 0;
   
   while (1) {
+    uint8_t highlight = 0;
+
     if (button_poll(BUT_MENU)) { // mode change
       return;
     }
@@ -846,14 +848,10 @@ void set_alarm(void)
       if (mode == SHOW_MENU) {
 	// ok now its selected
 	mode = SET_HOUR;
-	display_alarm(hour, min);
-	display[1] |= 0x1;
-	display[2] |= 0x1;	
+	highlight = 1;
       } else if (mode == SET_HOUR) {
 	mode = SET_MIN;
-	display_alarm(hour, min);
-	display[4] |= 0x1;
-	display[5] |= 0x1;
+	highlight = 4;
       } else {
 	// done!
 	alarm_h = hour;
@@ -869,15 +867,18 @@ void set_alarm(void)
       if (mode == SET_HOUR) {
 	hour = (hour+1) % 24;
 	display_alarm(hour, min);
-	display[1] |= 0x1;
-	display[2] |= 0x1;
+	highlight = 1;
       }
       if (mode == SET_MIN) {
 	min = (min+1) % 60;
-	display_alarm(hour, min);
-	display[4] |= 0x1;
-	display[5] |= 0x1;
+	highlight = 4;
       }
+    }
+
+    if (highlight && mode != SHOW_MENU) {
+      display_alarm(hour, min);
+      display[highlight+0] |= 0x1;
+      display[highlight+1] |= 0x1;
     }
   }
 }
