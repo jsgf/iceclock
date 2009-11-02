@@ -600,8 +600,10 @@ static unsigned char show_hour(unsigned char pos, unsigned char *v)
 
 static unsigned char show_str(unsigned char pos, unsigned char *v)
 {
-  char *c = (char *)v;
-  return __display_str(display+pos, c);
+  char str[DISPLAYSIZE + 1];
+
+  strcpy_P(str, (char *)v);
+  return __display_str(display+pos, str);
 }
 
 static unsigned char show_ampm(unsigned char pos, unsigned char *v)
@@ -610,40 +612,43 @@ static unsigned char show_ampm(unsigned char pos, unsigned char *v)
     return 0;
 
   if (*v >= 12)
-    return show_str(pos, (unsigned char *)" pm");
+    return show_str(pos, (unsigned char *)PSTR(" pm"));
   else
-    return show_str(pos, (unsigned char *)" am");
+    return show_str(pos, (unsigned char *)PSTR(" am"));
 }
 
 static const char *dayofweek(const struct date *date)
 {
-    uint16_t month, year;
-    uint8_t dotw;
+  uint16_t month, year;
+  uint8_t dotw;
+#define DOW(dow)	static const char dow[] PROGMEM = #dow
+  DOW(sunday);
+  DOW(monday);
+  DOW(tuesday);
+  DOW(wednsday);
+  DOW(thursday);
+  DOW(friday);
+  DOW(saturday);
+#undef DOW
+  static const char *days[] = {
+    sunday, monday, tuesday, wednsday, thursday, friday, saturday
+  };
 
-    month = date->m;
-    year = 2000 + date->y;
-    if (month < 3)  {
-      month += 12;
-      year -= 1;
-    }
+  month = date->m;
+  year = 2000 + date->y;
+  if (month < 3)  {
+    month += 12;
+    year -= 1;
+  }
 
-    dotw = (date->d +
-	    (2 * month) +
-	    (6 * (month+1)/10) +
-	    year + (year/4) -
-	    (year/100) +
-	    (year/400) + 1) % 7;
+  dotw = (date->d +
+	  (2 * month) +
+	  (6 * (month+1)/10) +
+	  year + (year/4) -
+	  (year/100) +
+	  (year/400) + 1) % 7;
 
-    switch (dotw) {
-    case 0:	return "sunday";
-    case 1:	return "monday";
-    case 2:	return "tuesday";
-    case 3:	return "wednsday";
-    case 4:	return "thursday";
-    case 5:	return "friday";
-    case 6:	return "saturday";
-    }
-    return "";
+  return days[dotw];
 }
 
 static unsigned char show_dayofweek(unsigned char pos, unsigned char *v)
@@ -655,21 +660,26 @@ static unsigned char show_dayofweek(unsigned char pos, unsigned char *v)
 
 static const char *monthname(uint8_t month)
 {
-  switch (month) {
-  case 1:	return "jan";
-  case 2:	return "feb";
-  case 3:	return "march";
-  case 4:	return "april";
-  case 5:	return "may";
-  case 6:	return "june";
-  case 7:	return "july";
-  case 8:	return "augst";
-  case 9:	return "sept";
-  case 10:	return "octob";
-  case 11:	return "novem";
-  case 12:	return "decem";
-  }
-  return "";
+#define MON(m)	static const char m[] PROGMEM = #m
+  MON(jan);
+  MON(feb);
+  MON(march);
+  MON(april);
+  MON(may);
+  MON(june);
+  MON(july);
+  MON(augst);
+  MON(sept);
+  MON(octob);
+  MON(novem);
+  MON(decem);
+#undef MON
+  static const char *months[] = {
+    jan, feb, march, april, may, june,
+    july, augst, sept, octob, novem, decem
+  };
+
+  return months[month-1];
 }
 
 static unsigned char show_monthname(unsigned char pos, unsigned char *v)
@@ -766,34 +776,40 @@ static struct menu_state {
   struct field fields[5];
 } menu_state;
 
+static unsigned char space_P[] PROGMEM = " ";
+static unsigned char dash_P[] PROGMEM = "-";
+
+#define SPACE	  { show_str, NULL, space_P }
+#define DASH	  { show_str, NULL, dash_P }
+
 static const struct field alarm_fields[] PROGMEM = {
   { show_hour, update_hour, &menu_state.time.h },
-  { show_str, NULL, (unsigned char *)"-" },
+  DASH,
   { show_num, update_mod60, &menu_state.time.m },
   { show_ampm, NULL, &menu_state.time.h },
 };
 
 static const struct field time_fields[] PROGMEM = {
   { show_hour, update_hour, &menu_state.time.h },
-  { show_str, NULL, (unsigned char *)" " },
+  SPACE,
   { show_num, update_mod60, &menu_state.time.m },
-  { show_str, NULL, (unsigned char *)" " },
+  SPACE,
   { show_num, update_mod60, &menu_state.time.s },
 };
 
 static const struct field us_date_fields[] PROGMEM = {
   { show_num, update_month, &menu_state.date.m },
-  { show_str, NULL, (unsigned char *)"-" },
+  DASH,
   { show_num, update_day, &menu_state.date.d },
-  { show_str, NULL, (unsigned char *)"-" },
+  DASH,
   { show_num, update_year, &menu_state.date.y },
 };
 
 static const struct field euro_date_fields[] PROGMEM = {
   { show_num, update_day, &menu_state.date.d },
-  { show_str, NULL, (unsigned char *)"-" },
+  DASH,
   { show_num, update_month, &menu_state.date.m },
-  { show_str, NULL, (unsigned char *)"-" },
+  DASH,
   { show_num, update_year, &menu_state.date.y },
 };
 
@@ -803,17 +819,19 @@ static const struct field dotw_fields[] PROGMEM = {
 
 static const struct field monthdate_fields[] PROGMEM = {
   { show_monthname, NULL, &menu_state.date.m },
-  { show_str, NULL, (unsigned char *)" " },
+  SPACE,
   { show_num_slz, NULL, &menu_state.date.d },
 };
 
+static unsigned char brite_P[] PROGMEM = "brite ";
 static const struct field brite_fields[] PROGMEM = {
-  { show_str, NULL, (unsigned char *)"brite " },
+  { show_str, NULL, brite_P },
   { show_num, update_brite, &menu_state.val },
 };
 
+static unsigned char vol_P[] PROGMEM = "vol ";
 static const struct field vol_fields[] PROGMEM = {
-  { show_str, NULL, (unsigned char *)"vol " },
+  { show_str, NULL, vol_P },
   { show_vol, update_vol, &menu_state.val },
 };
 
