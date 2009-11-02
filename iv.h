@@ -69,7 +69,6 @@ void delay(uint16_t delay);
 
 void (*app_start)(void) = 0x0000;
 
-void clock_init(void);
 void initbuttons(void);
 void boost_init(uint8_t pwm);
 void vfd_init(void);

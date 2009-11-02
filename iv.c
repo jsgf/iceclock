@@ -1170,6 +1170,45 @@ static void display_date(uint8_t style)
   }
 }
 
+/**************************** RTC & ALARM *****************************/
+static void clock_init(void) {
+  // we store the time in EEPROM when switching from power modes so its
+  // reasonable to start with whats in memory
+  timedate.time.h = eeprom_read_byte((uint8_t *)EE_HOUR) % 24;
+  timedate.time.m = eeprom_read_byte((uint8_t *)EE_MIN) % 60;
+  timedate.time.s = eeprom_read_byte((uint8_t *)EE_SEC) % 60;
+
+  /*
+    // if you're debugging, having the makefile set the right
+    // time automatically will be very handy. Otherwise don't use this
+  time_h = TIMEHOUR;
+  time_m = TIMEMIN;
+  time_s = TIMESEC + 10;
+  */
+
+  // Set up the stored alarm time and date
+  alarm.m = eeprom_read_byte((uint8_t *)EE_ALARM_MIN) % 60;
+  alarm.h = eeprom_read_byte((uint8_t *)EE_ALARM_HOUR) % 24;
+
+  timedate.date.y = eeprom_read_byte((uint8_t *)EE_YEAR) % 100;
+  timedate.date.m = eeprom_read_byte((uint8_t *)EE_MONTH) % 13;
+  timedate.date.d = eeprom_read_byte((uint8_t *)EE_DAY) % 32;
+
+  restored = 1;
+
+  // Turn on the RTC by selecting the external 32khz crystal
+  // 32.768 / 128 = 256 which is exactly an 8-bit timer overflow
+  ASSR |= _BV(AS2); // use crystal
+  TCCR2B = _BV(CS22) | _BV(CS20); // div by 128
+  // We will overflow once a second, and call an interrupt
+
+  // enable interrupt
+  TIMSK2 = _BV(TOIE2);
+
+  // enable all interrupts!
+  sei();
+}
+
 void gotosleep(void) {
   // battery
   //if (sleepmode) //already asleep?
@@ -1362,8 +1401,6 @@ int main(void) {
 
     // even in low power mode, we run the clock 
     DEBUGP("clock init");
-    clock_init();  
-
   } else {
     // we aren't in low power mode so init stuff
 
@@ -1396,10 +1433,11 @@ int main(void) {
     speaker_init();
 
     beep(4000, 1);
-
-    DEBUGP("clock init");
-    clock_init();  
   }
+  
+  DEBUGP("clock init");
+  clock_init();  
+
   DEBUGP("done");
   while (1) {
     //_delay_ms(100);
@@ -1422,45 +1460,6 @@ int main(void) {
      */
     sleep();
   }
-}
-
-/**************************** RTC & ALARM *****************************/
-void clock_init(void) {
-  // we store the time in EEPROM when switching from power modes so its
-  // reasonable to start with whats in memory
-  timedate.time.h = eeprom_read_byte((uint8_t *)EE_HOUR) % 24;
-  timedate.time.m = eeprom_read_byte((uint8_t *)EE_MIN) % 60;
-  timedate.time.s = eeprom_read_byte((uint8_t *)EE_SEC) % 60;
-
-  /*
-    // if you're debugging, having the makefile set the right
-    // time automatically will be very handy. Otherwise don't use this
-  time_h = TIMEHOUR;
-  time_m = TIMEMIN;
-  time_s = TIMESEC + 10;
-  */
-
-  // Set up the stored alarm time and date
-  alarm.m = eeprom_read_byte((uint8_t *)EE_ALARM_MIN) % 60;
-  alarm.h = eeprom_read_byte((uint8_t *)EE_ALARM_HOUR) % 24;
-
-  timedate.date.y = eeprom_read_byte((uint8_t *)EE_YEAR) % 100;
-  timedate.date.m = eeprom_read_byte((uint8_t *)EE_MONTH) % 13;
-  timedate.date.d = eeprom_read_byte((uint8_t *)EE_DAY) % 32;
-
-  restored = 1;
-
-  // Turn on the RTC by selecting the external 32khz crystal
-  // 32.768 / 128 = 256 which is exactly an 8-bit timer overflow
-  ASSR |= _BV(AS2); // use crystal
-  TCCR2B = _BV(CS22) | _BV(CS20); // div by 128
-  // We will overflow once a second, and call an interrupt
-
-  // enable interrupt
-  TIMSK2 = _BV(TOIE2);
-
-  // enable all interrupts!
-  sei();
 }
 
 // This turns on/off the alarm when the switch has been
