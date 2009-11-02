@@ -719,7 +719,9 @@ static void update_brite(unsigned char *v)
   if (new < BRITE_MIN)
     new = BRITE_MIN;
   if (new > BRITE_MAX)
-    new = BRITE_MAX;
+    new = BRITE_MIN;
+
+  OCR0A = new;
 
   *v = new;
 }
@@ -895,7 +897,6 @@ static void get_brite(void)
 
 static void store_brite(void)
 {
-  OCR0A = menu_state.val;
   eeprom_write_byte((uint8_t *)EE_BRIGHT, menu_state.val);
 }
 
