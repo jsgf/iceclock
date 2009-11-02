@@ -505,13 +505,9 @@ SIGNAL (TIMER2_OVF_vect) {
 SIGNAL(SIG_INTERRUPT0) {  
   EIMSK = 0;  //Disable this interrupt while we are processing it.
   uart_putchar('i');
-  uint8_t x = ALARM_PIN & _BV(ALARM);
-  sei();
-  delayms(10); // wait for debouncing
-  if (x != (ALARM_PIN & _BV(ALARM)))
-    goto out;
-  setalarmstate();
-out:
+
+  button_change_intr(BUT_ALARM, !(ALARM_PIN & _BV(ALARM)));
+
   EIMSK = _BV(INT0);  //And reenable it before exiting.
 }
 
@@ -595,7 +591,7 @@ void gotosleep(void) {
   PORTC &= ~_BV(4);
 }
  
- void wakeup(void) {
+void wakeup(void) {
    if (!sleepmode)
      return;
    CLKPR = _BV(CLKPCE);
@@ -625,8 +621,6 @@ void gotosleep(void) {
    speaker_init();
 
    kickthedog();
-
-   setalarmstate();
 
    // wake up sound
    beep(880, 1);
@@ -736,9 +730,6 @@ int main(void) {
 
     DEBUGP("clock init");
     clock_init();  
-
-    DEBUGP("alarm init");
-    setalarmstate();
   }
   DEBUGP("done");
   while (1) {
@@ -751,6 +742,9 @@ int main(void) {
       continue;
     }
     //DEBUGP(".");
+
+    /* recheck alarm switch */
+    setalarmstate();
 
     /* If the alarm is on then any button-press will kick off snooze */
     if (alarming && (button_sample(BUT_MENU) || button_sample(BUT_SET) || button_sample(BUT_NEXT))) {
@@ -1330,13 +1324,15 @@ void clock_init(void) {
 // This turns on/off the alarm when the switch has been
 // set. It also displays the alarm time
 void setalarmstate(void) {
-  if (ALARM_PIN & _BV(ALARM)) { 
-    // Don't display the alarm/beep if we already have
-    if  (!alarm_on) {
-      // alarm on!
-      alarm_on = 1;
-      // reset snoozing
-      snoozetimer = 0;
+  uint8_t want = button_poll(BUT_ALARM);
+
+  if (want == alarm_on)
+    return;
+
+  alarm_on = want;
+  snoozetimer = 0;
+
+  if (want) {
       // show the status on the VFD tube
       display_str("alarm on");
       // its not actually SHOW_SNOOZE but just anything but SHOW_TIME
@@ -1347,21 +1343,15 @@ void setalarmstate(void) {
       delayms(1000);
       // after a second, go back to clock mode
       displaymode = SHOW_TIME;
-    }
   } else {
-    if (alarm_on) {
-      // turn off the alarm
-      alarm_on = 0;
-      snoozetimer = 0;
-      if (alarming) {
-	// if the alarm is going off, we should turn it off
-	// and quiet the speaker
-	DEBUGP("alarm off");
-	alarming = 0;
-	TCCR1B &= ~_BV(CS11); // turn it off!
-	PORTB |= _BV(SPK1) | _BV(SPK2);
-      } 
-    }
+    if (alarming) {
+      // if the alarm is going off, we should turn it off
+      // and quiet the speaker
+      DEBUGP("alarm off");
+      alarming = 0;
+      TCCR1B &= ~_BV(CS11); // turn it off!
+      PORTB |= _BV(SPK1) | _BV(SPK2);
+    } 
   }
 }
 
