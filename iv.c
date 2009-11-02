@@ -222,8 +222,13 @@ static uint16_t button_repeat;		/* timeout for NEXT button repeat */
  */
 static void button_change_intr(uint8_t button, uint8_t state)
 {
-  uint8_t bmask = BMASK(button);
-  uint8_t bstate = button_state & bmask;
+  uint8_t bmask;
+  uint8_t bstate;
+
+  cli();
+
+  bmask = BMASK(button);
+  bstate = button_state & bmask;
 
   if (state) {
     /* pressed, so open->closed, anything else unaffected */
@@ -239,15 +244,20 @@ static void button_change_intr(uint8_t button, uint8_t state)
 
   /* update state */
   button_state = (button_state & ~bmask) | bstate;
+
+  sei();
 }
 
 /* Called every millisecond(ish) to update button state */
 static void button_state_update(void)
 {
   uint8_t i;
-  uint8_t bs = button_state;
+  uint8_t bs;
   uint16_t timeout, rept;
 
+  cli();
+
+  bs = button_state;
   for (i = 0; i < NBUTTONS; i++) {
     uint8_t s = bs & BS_MASK;
     switch (s) {
@@ -289,6 +299,8 @@ static void button_state_update(void)
   }
 
   button_state = bs;
+
+  sei();
 }
 
 /*
