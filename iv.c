@@ -36,10 +36,13 @@ THE SOFTWARE.
 
 uint8_t region = REGION_US;
 
-// These variables store the current time.
-volatile uint8_t time_s, time_m, time_h;
-// ... and current date
-volatile uint8_t date_m, date_d, date_y;
+struct timedate {
+  uint8_t time_s, time_m, time_h;
+  uint8_t date_m, date_d, date_y;
+};
+
+// These variables store the current time and date.
+volatile struct timedate timedate;
 
 // how loud is the speaker supposed to be?
 volatile uint8_t volume;
@@ -299,31 +302,34 @@ volatile uint8_t timeoutcounter = 0;
 
 // this goes off once a second
 SIGNAL (TIMER2_OVF_vect) {
+  struct timedate td;
   CLKPR = _BV(CLKPCE);  //MEME
   CLKPR = 0;
 
-  time_s++;             // one second has gone by
+  td = timedate;
+
+  td.time_s++;             // one second has gone by
 
   // a minute!
-  if (time_s >= 60) {
-    time_s = 0;
-    time_m++;
+  if (td.time_s >= 60) {
+    td.time_s = 0;
+    td.time_m++;
   }
 
   // an hour...
-  if (time_m >= 60) {
-    time_m = 0;
-    time_h++; 
+  if (td.time_m >= 60) {
+    td.time_m = 0;
+    td.time_h++; 
     // lets write the time to the EEPROM
-    eeprom_write_byte((uint8_t *)EE_HOUR, time_h);
-    eeprom_write_byte((uint8_t *)EE_MIN, time_m);
+    eeprom_write_byte((uint8_t *)EE_HOUR, td.time_h);
+    eeprom_write_byte((uint8_t *)EE_MIN, td.time_m);
   }
 
   // a day....
-  if (time_h >= 24) {
-    time_h = 0;
-    date_d++;
-    eeprom_write_byte((uint8_t *)EE_DAY, date_d);
+  if (td.time_h >= 24) {
+    td.time_h = 0;
+    td.date_d++;
+    eeprom_write_byte((uint8_t *)EE_DAY, td.date_d);
   }
 
   /*
@@ -339,32 +345,34 @@ SIGNAL (TIMER2_OVF_vect) {
 
   // a full month!
   // we check the leapyear and date to verify when its time to roll over months
-  if ((date_d > 31) ||
-      ((date_d == 31) && ((date_m == 4)||(date_m == 6)||(date_m == 9)||(date_m == 11))) ||
-      ((date_d == 30) && (date_m == 2)) ||
-      ((date_d == 29) && (date_m == 2) && !leapyear(2000+date_y))) {
-    date_d = 1;
-    date_m++;
-    eeprom_write_byte((uint8_t *)EE_MONTH, date_m);
+  if ((td.date_d > 31) ||
+      ((td.date_d == 31) && ((td.date_m == 4)||(td.date_m == 6)||(td.date_m == 9)||(td.date_m == 11))) ||
+      ((td.date_d == 30) && (td.date_m == 2)) ||
+      ((td.date_d == 29) && (td.date_m == 2) && !leapyear(2000+td.date_y))) {
+    td.date_d = 1;
+    td.date_m++;
+    eeprom_write_byte((uint8_t *)EE_MONTH, td.date_m);
   }
   
   // HAPPY NEW YEAR!
-  if (date_m >= 13) {
-    date_y++;
-    date_m = 1;
-    eeprom_write_byte((uint8_t *)EE_YEAR, date_y);
+  if (td.date_m >= 13) {
+    td.date_y++;
+    td.date_m = 1;
+    eeprom_write_byte((uint8_t *)EE_YEAR, td.date_y);
   }
   
+  timedate = td;
+
   // If we're in low power mode we should get out now since the display is off
   if (sleepmode)
     return;
    
 
   if (displaymode == SHOW_TIME) {
-    if (timeunknown && (time_s % 2)) {
+    if (timeunknown && (timedate.time_s % 2)) {
       display_str("        ");
     } else {
-      display_time(time_h, time_m, time_s);
+      display_time(timedate.time_h, timedate.time_m, timedate.time_s);
     }
     if (alarm_on)
       display[0] |= 0x2;
@@ -372,7 +380,7 @@ SIGNAL (TIMER2_OVF_vect) {
       display[0] &= ~0x2;
     
   }
-  if (alarm_on && (alarm_h == time_h) && (alarm_m == time_m) && (time_s == 0)) {
+  if (alarm_on && (alarm_h == timedate.time_h) && (alarm_m == timedate.time_m) && (timedate.time_s == 0)) {
     DEBUGP("alarm on!");
     alarming = 1;
     snoozetimer = 0;
@@ -416,8 +424,8 @@ SIGNAL(SIG_COMPARATOR) {
       BOOST_PORT &= ~_BV(BOOST); // pull boost fet low
       SPCR  &= ~_BV(SPE); // turn off spi
       if (restored) {
-	eeprom_write_byte((uint8_t *)EE_MIN, time_m);
-	eeprom_write_byte((uint8_t *)EE_SEC, time_s);
+	eeprom_write_byte((uint8_t *)EE_MIN, timedate.time_m);
+	eeprom_write_byte((uint8_t *)EE_SEC, timedate.time_s);
       }
       DEBUGP("z");
       TCCR0B = 0; // no boost
@@ -430,8 +438,8 @@ SIGNAL(SIG_COMPARATOR) {
     //DEBUGP("LOW");
     if (sleepmode) {
       if (restored) {
-	eeprom_write_byte((uint8_t *)EE_MIN, time_m);
-	eeprom_write_byte((uint8_t *)EE_SEC, time_s);
+	eeprom_write_byte((uint8_t *)EE_MIN, timedate.time_m);
+	eeprom_write_byte((uint8_t *)EE_SEC, timedate.time_s);
       }
       DEBUGP("WAKERESET"); 
       app_start();
@@ -775,9 +783,9 @@ void set_time(void)
   uint8_t mode;
   uint8_t hour, min, sec;
     
-  hour = time_h;
-  min = time_m;
-  sec = time_s;
+  hour = timedate.time_h;
+  min = timedate.time_m;
+  sec = timedate.time_s;
   mode = SHOW_MENU;
 
   timeoutcounter = INACTIVITYTIMEOUT;
@@ -797,9 +805,9 @@ void set_time(void)
     if (just_pressed & 0x2) {
       just_pressed = 0;
       if (mode == SHOW_MENU) {
-	hour = time_h;
-	min = time_m;
-	sec = time_s;
+	hour = timedate.time_h;
+	min = timedate.time_m;
+	sec = timedate.time_s;
 
 	// ok now its selected
 	mode = SET_HOUR;
@@ -818,9 +826,9 @@ void set_time(void)
 	display[8] |= 0x1;
       } else {
 	// done!
-	time_h = hour;
-	time_m = min;
-	time_s = sec;
+	timedate.time_h = hour;
+	timedate.time_m = min;
+	timedate.time_s = sec;
 	displaymode = SHOW_TIME;
 	return;
       }
@@ -833,23 +841,23 @@ void set_time(void)
 	display_time(hour, min, sec);
 	display[1] |= 0x1;
 	display[2] |= 0x1;
-	time_h = hour;
-	eeprom_write_byte((uint8_t *)EE_HOUR, time_h);    
+	timedate.time_h = hour;
+	eeprom_write_byte((uint8_t *)EE_HOUR, timedate.time_h);    
       }
       if (mode == SET_MIN) {
 	min = (min+1) % 60;
 	display_time(hour, min, sec);
 	display[4] |= 0x1;
 	display[5] |= 0x1;
-	eeprom_write_byte((uint8_t *)EE_MIN, time_m);
-	time_m = min;
+	eeprom_write_byte((uint8_t *)EE_MIN, timedate.time_m);
+	timedate.time_m = min;
       }
       if ((mode == SET_SEC) ) {
 	sec = (sec+1) % 60;
 	display_time(hour, min, sec);
 	display[7] |= 0x1;
 	display[8] |= 0x1;
-	time_s = sec;
+	timedate.time_s = sec;
       }
       
       if (pressed & 0x4)
@@ -918,9 +926,9 @@ void set_date(void) {
     if ((just_pressed & 0x4) || (pressed & 0x4)) {
       just_pressed = 0;
       if (mode == SET_MONTH) {
-	date_m++;
-	if (date_m >= 13)
-	  date_m = 1;
+	timedate.date_m++;
+	if (timedate.date_m >= 13)
+	  timedate.date_m = 1;
 	display_date(DATE);
 	if (region == REGION_US) {
 	  display[1] |= 0x1;
@@ -929,12 +937,12 @@ void set_date(void) {
 	  display[4] |= 0x1;
 	  display[5] |= 0x1;
 	}
-	eeprom_write_byte((uint8_t *)EE_MONTH, date_m);    
+	eeprom_write_byte((uint8_t *)EE_MONTH, timedate.date_m);    
       }
       if (mode == SET_DAY) {
-	date_d++;
-	if (date_d > 31)
-	  date_d = 1;
+	timedate.date_d++;
+	if (timedate.date_d > 31)
+	  timedate.date_d = 1;
 	display_date(DATE);
 
 	if (region == REGION_EU) {
@@ -944,15 +952,15 @@ void set_date(void) {
 	  display[4] |= 0x1;
 	  display[5] |= 0x1;
 	}
-	eeprom_write_byte((uint8_t *)EE_DAY, date_d);    
+	eeprom_write_byte((uint8_t *)EE_DAY, timedate.date_d);    
       }
       if (mode == SET_YEAR) {
-	date_y++;
-	date_y %= 100;
+	timedate.date_y++;
+	timedate.date_y %= 100;
 	display_date(DATE);
 	display[7] |= 0x1;
 	display[8] |= 0x1;
-	eeprom_write_byte((uint8_t *)EE_YEAR, date_y);    
+	eeprom_write_byte((uint8_t *)EE_YEAR, timedate.date_y);    
       }
 
       if (pressed & 0x4)
@@ -1199,9 +1207,9 @@ void set_snooze(void) {
 void clock_init(void) {
   // we store the time in EEPROM when switching from power modes so its
   // reasonable to start with whats in memory
-  time_h = eeprom_read_byte((uint8_t *)EE_HOUR) % 24;
-  time_m = eeprom_read_byte((uint8_t *)EE_MIN) % 60;
-  time_s = eeprom_read_byte((uint8_t *)EE_SEC) % 60;
+  timedate.time_h = eeprom_read_byte((uint8_t *)EE_HOUR) % 24;
+  timedate.time_m = eeprom_read_byte((uint8_t *)EE_MIN) % 60;
+  timedate.time_s = eeprom_read_byte((uint8_t *)EE_SEC) % 60;
 
   /*
     // if you're debugging, having the makefile set the right
@@ -1215,9 +1223,9 @@ void clock_init(void) {
   alarm_m = eeprom_read_byte((uint8_t *)EE_ALARM_MIN) % 60;
   alarm_h = eeprom_read_byte((uint8_t *)EE_ALARM_HOUR) % 24;
 
-  date_y = eeprom_read_byte((uint8_t *)EE_YEAR) % 100;
-  date_m = eeprom_read_byte((uint8_t *)EE_MONTH) % 13;
-  date_d = eeprom_read_byte((uint8_t *)EE_DAY) % 32;
+  timedate.date_y = eeprom_read_byte((uint8_t *)EE_YEAR) % 100;
+  timedate.date_m = eeprom_read_byte((uint8_t *)EE_MONTH) % 13;
+  timedate.date_d = eeprom_read_byte((uint8_t *)EE_DAY) % 32;
 
   restored = 1;
 
@@ -1382,15 +1390,15 @@ void display_date(uint8_t style) {
 
     if (region == REGION_US) {
       // mm-dd-yy
-      emit_number(&display[1], date_m);
-      emit_number(&display[4], date_d);
+      emit_number(&display[1], timedate.date_m);
+      emit_number(&display[4], timedate.date_d);
     } else {
       // dd-mm-yy
-      emit_number(&display[1], date_d);
-      emit_number(&display[4], date_m);
+      emit_number(&display[1], timedate.date_d);
+      emit_number(&display[4], timedate.date_m);
     }
     // the yy part is the same
-    emit_number(&display[7], date_y);
+    emit_number(&display[7], timedate.date_y);
   } else if (style == DAY) {
     // This is more "Sunday June 21" style
 
@@ -1399,13 +1407,13 @@ void display_date(uint8_t style) {
 
     // Calculate day of the week
     
-    month = date_m;
-    year = 2000 + date_y;
-    if (date_m < 3)  {
+    month = timedate.date_m;
+    year = 2000 + timedate.date_y;
+    if (timedate.date_m < 3)  {
       month += 12;
       year -= 1;
     }
-    dotw = (date_d + (2 * month) + (6 * (month+1)/10) + year + (year/4) - (year/100) + (year/400) + 1) % 7;
+    dotw = (timedate.date_d + (2 * month) + (6 * (month+1)/10) + year + (year/4) - (year/100) + (year/400) + 1) % 7;
 
     // Display the day first
     display[8] = display[7] = 0;
@@ -1431,7 +1439,7 @@ void display_date(uint8_t style) {
 
     // Then display the month and date
     display[6] = display[5] = display[4] = 0;
-    switch (date_m) {
+    switch (timedate.date_m) {
     case 1:
       display_str("jan"); break;
     case 2:
@@ -1457,7 +1465,7 @@ void display_date(uint8_t style) {
     case 12:
       display_str("decem"); break;
     }
-    emit_number(&display[7], date_d);
+    emit_number(&display[7], timedate.date_d);
   }
 }
 
