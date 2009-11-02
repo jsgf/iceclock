@@ -1118,7 +1118,9 @@ static void display_entry(char highlight)
     display[i] = 0;
 }
 
-static uint8_t skip_to_next_input(const struct field *field, unsigned char nfields, uint8_t next)
+/* Skip to next valid input field; left unchanged if already valid. */
+static uint8_t skip_to_next_input(const struct field *field, unsigned char nfields,
+				  uint8_t next)
 {
   while(next < nfields && field[next].update == NULL)
     next++;
@@ -1134,10 +1136,14 @@ static void show_entry(const struct entry *entry)
   entry->get();
 
   nfields = menu_state.nfields;
-  input = skip_to_next_input(menu_state.fields, nfields, 0);
-  field = &menu_state.fields[input];
+  input = 0;
 
-  while (input < nfields) {
+  for (;;) {
+    input = skip_to_next_input(menu_state.fields, nfields, input);
+    if (input >= nfields)
+      break;
+    field = &menu_state.fields[input];
+
     display_entry(input);
 
     for (;;) {
@@ -1152,8 +1158,7 @@ static void show_entry(const struct entry *entry)
       }
 
       if (button_sample(BUT_SET)) {
-	input = skip_to_next_input(menu_state.fields, nfields, input+1);
-	field = &menu_state.fields[input];
+	input++;
 	break;
       }
 
