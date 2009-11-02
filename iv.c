@@ -591,33 +591,31 @@ static unsigned char show_str(unsigned char pos, unsigned char *v)
 
 static void update_hour(unsigned char *v)
 {
-  unsigned char hour = *v;
-  hour = (hour + 1) % 24;
-  *v = hour;
+  if (++*v >= 24)
+    *v = 0;
 }
 
 static void update_mod60(unsigned char *v)
 {
-  unsigned char s = *v;
-  s = (s + 1) % 60;
-  *v = s;
+  if (++*v >= 60)
+    *v = 0;
 }
 
 static void update_day(unsigned char *v)
 {
-  if (*v++ > 31)
+  if (++*v > 31)
     *v = 1;
 }
 
 static void update_month(unsigned char *v)
 {
-  if (*v++ > 12)
+  if (++*v > 12)
     *v = 1;
 }
 
 static void update_year(unsigned char *v)
 {
-  if (*v++ > 99)
+  if (++*v > 99)
     *v = 0;
 }
 
