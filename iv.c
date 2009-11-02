@@ -969,9 +969,17 @@ void set_date(void) {
   }
 }
 
-static void __emit_number(uint8_t *disp, uint8_t num, uint8_t extra)
+#define EMIT_DOT	1	/* show "updating" dot */
+#define EMIT_SLZ	2	/* suppress leading zero */
+
+static void __emit_number(uint8_t *disp, uint8_t num, uint8_t flags)
 {
-  disp[0] = pgm_read_byte(numbertable + (num / 10)) | extra;
+  uint8_t extra = flags & EMIT_DOT;
+
+  if ((flags & EMIT_SLZ) && num < 10)
+    disp[0] = 0;
+  else
+    disp[0] = pgm_read_byte(numbertable + (num / 10)) | extra;
   disp[1] = pgm_read_byte(numbertable + (num % 10)) | extra; 
 }
 
@@ -982,7 +990,12 @@ static void emit_number(uint8_t *disp, uint8_t num)
 
 static void emit_number_dots(uint8_t *disp, uint8_t num)
 {
-  __emit_number(disp, num, 0x1);
+  __emit_number(disp, num, EMIT_DOT);
+}
+
+static void emit_number_slz(uint8_t *disp, uint8_t num)
+{
+  __emit_number(disp, num, EMIT_SLZ);
 }
 
 void set_brightness(void) {
