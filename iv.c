@@ -99,8 +99,6 @@ static inline void sleep(void)
   asm volatile("sei; sleep" : : : "memory");
 }
 
-#define barrier()	asm("" : : : "memory")
-
 // We have a non-blocking delay function, milliseconds is updated by
 // an interrupt
 volatile uint16_t milliseconds = 0;
@@ -112,9 +110,7 @@ static uint16_t now(void)
 
   do {
     h = ms[1];
-    barrier();
     l = ms[0];
-    barrier();
   } while(h != ms[1]);
 
   return (h << 8) | l;
