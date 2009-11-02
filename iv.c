@@ -893,6 +893,8 @@ void set_time(void)
   mode = SHOW_MENU;
 
   while (1) {
+    uint8_t highlight = 0;
+
     if (button_poll(BUT_MENU)) { // mode change
       return;
     }
@@ -902,27 +904,28 @@ void set_time(void)
       return;
     }
     if (button_sample(BUT_SET)) {
-      if (mode == SHOW_MENU) {
+      switch (mode) {
+      case SHOW_MENU:
 	hour = timedate.time_h;
 	min = timedate.time_m;
 	sec = timedate.time_s;
 
 	// ok now its selected
 	mode = SET_HOUR;
-	display_time(hour, min, sec);
-	display[1] |= 0x1;
-	display[2] |= 0x1;	
-      } else if (mode == SET_HOUR) {
+	highlight = 1;
+	break;
+
+      case SET_HOUR:
 	mode = SET_MIN;
-	display_time(hour, min, sec);
-	display[4] |= 0x1;
-	display[5] |= 0x1;
-      } else if (mode == SET_MIN) {
+	highlight = 4;
+	break;
+
+      case SET_MIN:
 	mode = SET_SEC;
-	display_time(hour, min, sec);
-	display[7] |= 0x1;
-	display[8] |= 0x1;
-      } else {
+	highlight = 7;
+	break;
+
+      case SET_SEC:
 	// done!
 	timedate.time_h = hour;
 	timedate.time_m = min;
@@ -931,30 +934,34 @@ void set_time(void)
 	return;
       }
     }
-    if (button_sample(BUT_NEXT)) {      
-      if (mode == SET_HOUR) {
+
+    if (button_sample(BUT_NEXT)) {
+      switch (mode) {
+      case SET_HOUR:
 	hour = (hour+1) % 24;
-	display_time(hour, min, sec);
-	display[1] |= 0x1;
-	display[2] |= 0x1;
+	highlight = 1;
 	timedate.time_h = hour;
-	eeprom_write_byte((uint8_t *)EE_HOUR, timedate.time_h);    
-      }
-      if (mode == SET_MIN) {
+	eeprom_write_byte((uint8_t *)EE_HOUR, timedate.time_h);
+	break;
+
+      case SET_MIN:
 	min = (min+1) % 60;
-	display_time(hour, min, sec);
-	display[4] |= 0x1;
-	display[5] |= 0x1;
+	highlight = 4;
+	timedate.time_m = min;	
 	eeprom_write_byte((uint8_t *)EE_MIN, timedate.time_m);
-	timedate.time_m = min;
-      }
-      if ((mode == SET_SEC) ) {
+	break;
+
+      case SET_SEC:
 	sec = (sec+1) % 60;
-	display_time(hour, min, sec);
-	display[7] |= 0x1;
-	display[8] |= 0x1;
+	highlight = 7;
 	timedate.time_s = sec;
       }
+    }
+
+    if (highlight && mode != SHOW_MENU) {
+      display_time(hour, min, sec);
+      display[highlight+0] |= 0x1;
+      display[highlight+1] |= 0x1;
     }
   }
 }
