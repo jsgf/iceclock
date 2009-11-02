@@ -64,7 +64,7 @@ volatile uint8_t displaymode;
 // are we in low power sleep mode?
 volatile uint8_t sleepmode = 0;
 
-volatile uint8_t timeunknown = 0;        // MEME
+uint8_t timeunknown = 0;        // MEME
 volatile uint8_t restored = 0;
 
 // Our display buffer, which is updated to show the time/date/etc
@@ -473,32 +473,14 @@ SIGNAL (TIMER2_OVF_vect) {
   if (sleepmode)
     return;
    
-
-  if (displaymode == SHOW_TIME) {
-    if (timeunknown && (timedate.time_s % 2)) {
-      display_str("        ");
-    } else {
-      display_time(timedate.time_h, timedate.time_m, timedate.time_s);
-    }
-    if (alarm_on)
-      display[0] |= 0x2;
-    else 
-      display[0] &= ~0x2;
-    
-  }
   if (alarm_on && (alarm_h == timedate.time_h) && (alarm_m == timedate.time_m) && (timedate.time_s == 0)) {
     DEBUGP("alarm on!");
     alarming = 1;
     snoozetimer = 0;
   }
 
-  if (snoozetimer) {
+  if (snoozetimer)
     snoozetimer--;
-    if (snoozetimer % 2) 
-      display[0] |= 0x2;
-    else
-      display[0] &= ~0x2;
-  }
 }
 
 //Alarm Switch
@@ -747,10 +729,23 @@ int main(void) {
     setalarmstate();
 
     /* If the alarm is on then any button-press will kick off snooze */
-    if (alarming && (button_sample(BUT_MENU) || button_sample(BUT_SET) || button_sample(BUT_NEXT))) {
+    if (alarming && (button_sample(BUT_MENU) ||
+		     button_sample(BUT_SET) ||
+		     button_sample(BUT_NEXT))) {
       setsnooze();
       continue;
     }
+
+    if (timeunknown && (timedate.time_s % 2))
+      display_str("        ");
+    else
+      display_time(timedate.time_h, timedate.time_m, timedate.time_s);
+    
+    /* snoozetimer == 0 if we're not alarming */
+    if (alarm_on && (snoozetimer % 2) == 0)
+      display[0] |= 0x2;
+    else 
+      display[0] &= ~0x2;
 
     if (button_sample(BUT_MENU)) {
       switch(displaymode) {
