@@ -737,6 +737,14 @@ static void update_toggle(unsigned char *v)
   *v = !*v;
 }  
 
+static void update_vol(unsigned char *v)
+{
+  *v = !*v;
+  volume = *v;
+  speaker_init();
+  beep(4000, 1);
+}
+
 static unsigned char show_region(unsigned char pos, unsigned char *v)
 {
   if (*v == REGION_US)
@@ -804,7 +812,7 @@ static const struct field brite_fields[] PROGMEM = {
 
 static const struct field vol_fields[] PROGMEM = {
   { show_str, NULL, (unsigned char *)"vol " },
-  { show_vol, update_toggle, &menu_state.val },
+  { show_vol, update_vol, &menu_state.val },
 };
 
 static const struct field region_fields[] PROGMEM = {
@@ -899,11 +907,7 @@ static void get_vol(void)
 
 static void store_vol(void)
 {
-  volume = menu_state.val;
-
-  eeprom_write_byte((uint8_t *)EE_VOLUME, menu_state.val);
-  speaker_init();
-  beep(4000, 1);
+   eeprom_write_byte((uint8_t *)EE_VOLUME, menu_state.val);
 }
 
 static void get_region(void)
@@ -1232,6 +1236,9 @@ int main(void) {
     region = eeprom_read_byte((uint8_t *)EE_REGION);
     
     DEBUGP("speaker init");
+
+    // read the preferences for high/low volume
+    volume = eeprom_read_byte((uint8_t *)EE_VOLUME);
     speaker_init();
 
     beep(4000, 1);
@@ -1376,9 +1383,6 @@ uint8_t leapyear(uint16_t y) {
 /**************************** SPEAKER *****************************/
 // Set up the speaker to prepare for beeping!
 void speaker_init(void) {
-
-  // read the preferences for high/low volume
-  volume = eeprom_read_byte((uint8_t *)EE_VOLUME);
 
   // We use the built-in fast PWM, 8 bit timer
   PORTB |= _BV(SPK1) | _BV(SPK2); 
