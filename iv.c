@@ -35,8 +35,8 @@ THE SOFTWARE.
 #include "util.h"
 #include "fonttable.h"
 
-uint8_t region = REGION_US;
-
+static uint8_t region = REGION_US;
+static uint8_t secondmode = SEC_FULL;
 /*
  * Barrier to force compiler to make sure memory is up-to-date.  This
  * is preferable to using "volatile" because we can just resync with
@@ -612,9 +612,35 @@ static unsigned char show_ampm(unsigned char pos, unsigned char *v)
     return 0;
 
   if (*v >= 12)
-    return show_str(pos, (unsigned char *)PSTR(" pm"));
+    return show_str(pos, (unsigned char *)PSTR("pm"));
   else
-    return show_str(pos, (unsigned char *)PSTR(" am"));
+    return show_str(pos, (unsigned char *)PSTR("am"));
+}
+
+static unsigned char show_second(unsigned char pos, unsigned char *v)
+{
+  struct time *t = (struct time *)v;
+  unsigned char s = t->s;
+
+  switch (secondmode) {
+  default:
+  case SEC_FULL:
+    emit_number(display+pos, s);
+    return 2;
+
+  case SEC_DIAL:
+    display[pos] = (0x80 >> (s / 10)) | ((s & 1) << 1);
+    return 1;
+
+  case SEC_AMPM:
+    if (region == REGION_US)
+      return show_ampm(pos, &t->h);
+    /* FALLTHROUGH */
+
+  case SEC_NONE:
+    display[pos] = (s & 1);
+    return 1;
+  }
 }
 
 static const char *dayofweek(const struct date *date)
@@ -765,6 +791,26 @@ static unsigned char show_region(unsigned char pos, unsigned char *v)
     return __display_str(display+pos, "eur-24hr");
 }
 
+static unsigned char show_secmode(unsigned char pos, unsigned char *v)
+{
+  const char *ret;
+
+  switch (*v) {
+  default:
+  case SEC_FULL:	ret = "full"; break;
+  case SEC_DIAL:	ret = "dial"; break;
+  case SEC_AMPM:	ret = "ampm"; break;
+  case SEC_NONE:	ret = "none"; break;
+  }
+  return __display_str(display+pos, ret);
+}
+
+static void update_secmode(unsigned char *v)
+{
+  if (++*v > SEC_NONE)
+    *v = 0;
+}
+
 static struct menu_state {
   union {
     struct time time;
@@ -786,6 +832,7 @@ static const struct field alarm_fields[] PROGMEM = {
   { show_hour, update_hour, &menu_state.time.h },
   DASH,
   { show_num, update_mod60, &menu_state.time.m },
+  SPACE,
   { show_ampm, NULL, &menu_state.time.h },
 };
 
@@ -794,7 +841,15 @@ static const struct field time_fields[] PROGMEM = {
   SPACE,
   { show_num, update_mod60, &menu_state.time.m },
   SPACE,
-  { show_num, update_mod60, &menu_state.time.s },
+  { show_second, NULL, (unsigned char *)&menu_state.time },
+};
+
+static const struct field timeset_fields[] PROGMEM = {
+  { show_hour, update_hour, &menu_state.time.h },
+  SPACE,
+  { show_num, update_mod60, &menu_state.time.m },
+  SPACE,
+  { show_num, update_mod60, (unsigned char *)&menu_state.time.s },
 };
 
 static const struct field us_date_fields[] PROGMEM = {
@@ -839,6 +894,12 @@ static const struct field region_fields[] PROGMEM = {
   { show_region, update_toggle, &menu_state.val },
 };
 
+static unsigned char sec_P[] PROGMEM = "sec ";
+static const struct field secmode_fields[] PROGMEM = {
+  { show_str, NULL, sec_P },
+  { show_secmode, update_secmode, &menu_state.val },
+};
+
 #define NELEM(a)	(sizeof(a) / sizeof(*a))
 static void copy_fields(const struct field PROGMEM *fields, unsigned int nelem)
 {
@@ -862,7 +923,7 @@ static void store_alarm(void)
 
 static void get_time(void)
 {
-  copy_fields(time_fields, NELEM(time_fields));
+  copy_fields(timeset_fields, NELEM(timeset_fields));
   barrier();
   menu_state.time = timedate.time;
 }
@@ -941,6 +1002,18 @@ static void store_region(void)
   eeprom_write_byte((uint8_t *)EE_REGION, menu_state.val);
 }
 
+static void get_secmode(void)
+{
+  copy_fields(secmode_fields, NELEM(secmode_fields));
+  menu_state.val = eeprom_read_byte((uint8_t *)EE_SECONDMODE);
+}
+
+static void store_secmode(void)
+{
+  secondmode = menu_state.val;
+  eeprom_write_byte((uint8_t *)EE_SECONDMODE, menu_state.val);
+}
+
 static const struct entry mainmenu[] = {
   { "set alarm", get_alarm, store_alarm },
   { "set time", get_time, store_time },
@@ -948,6 +1021,7 @@ static const struct entry mainmenu[] = {
   { "set brit", get_brite, store_brite },
   { "set vol", get_vol, store_vol },
   { "set regn", get_region, store_region },
+  { "set secs", get_secmode, store_secmode },
 };
 
 static void display_entry(char highlight)
@@ -1049,7 +1123,9 @@ static void show_menu(const struct entry *menu, int nentries)
 // This displays a time on the clock
 static void display_time(void)
 {
-  get_time();
+  copy_fields(time_fields, NELEM(time_fields));
+  barrier();
+  menu_state.time = timedate.time;
   display_entry(-1);
 }
 
@@ -1253,6 +1329,7 @@ int main(void) {
     sei();
 
     region = eeprom_read_byte((uint8_t *)EE_REGION);
+    secondmode = eeprom_read_byte((uint8_t *)EE_SECONDMODE);
     
     DEBUGP("speaker init");
 

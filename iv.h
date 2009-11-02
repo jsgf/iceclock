@@ -46,6 +46,11 @@ THE SOFTWARE.
 #define BEEP_2KHZ 20
 #define BEEP_1KHZ 40
 
+#define SEC_FULL 0
+#define SEC_DIAL 1
+#define SEC_AMPM 2
+#define SEC_NONE 3
+
 #define EE_YEAR 1
 #define EE_MONTH 2
 #define EE_DAY 3
@@ -58,6 +63,7 @@ THE SOFTWARE.
 #define EE_VOLUME 10
 #define EE_REGION 11
 #define EE_SNOOZE 12
+#define EE_SECONDMODE 13
 
 void delay(uint16_t delay);
 
