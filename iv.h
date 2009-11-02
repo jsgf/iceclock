@@ -71,7 +71,7 @@ void speaker_init(void);
 
 void display_time(uint8_t h, uint8_t m, uint8_t s);
 void display_date(uint8_t style);
-void display_str(char *s);
+void display_str(const char *s);
 void display_alarm(uint8_t h, uint8_t m);
 
 void set_time(void);

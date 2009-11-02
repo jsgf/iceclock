@@ -44,6 +44,8 @@ uint8_t region = REGION_US;
  */
 #define barrier()	asm volatile("" : : : "memory")
 
+static void __display_str(uint8_t *disp, const char *s);
+
 struct timedate {
   uint8_t time_s, time_m, time_h;
   uint8_t date_m, date_d, date_y;
@@ -528,7 +530,403 @@ SIGNAL(SIG_COMPARATOR) {
 }
 /*********************** Main app **********/
 
+#define EMIT_SLZ	1	/* suppress leading zero */
+
+static void __emit_number(uint8_t *disp, uint8_t num, uint8_t flags)
+{
+  if ((flags & EMIT_SLZ) && num < 10)
+    disp[0] = 0;
+  else
+    disp[0] = pgm_read_byte(numbertable + (num / 10));
+  disp[1] = pgm_read_byte(numbertable + (num % 10)); 
+}
+
+static void emit_number(uint8_t *disp, uint8_t num)
+{
+  __emit_number(disp, num, 0);
+}
+
+static void emit_number_slz(uint8_t *disp, uint8_t num)
+{
+  __emit_number(disp, num, EMIT_SLZ);
+}
+
+
 uint32_t t;
+
+struct field {
+  unsigned char (*display)(unsigned char pos, unsigned char *val);
+  void (*update)(unsigned char *val);
+  unsigned char *val;
+};
+
+struct entry {
+  const char *prompt;
+  void (*get)(void);
+  void (*store)(void);
+};
+
+static unsigned char show_num(unsigned char pos, unsigned char *v)
+{
+  emit_number(&display[pos], *v);
+  return 2;
+}
+
+static unsigned char show_dash(unsigned char pos, unsigned char *v)
+{
+  display[pos] = 0x2;		/* dash */
+  return 1;
+}
+
+static unsigned char show_space(unsigned char pos, unsigned char *v)
+{
+  display[pos] = 0x0;
+  return 1;
+}
+
+static unsigned char show_str(unsigned char pos, unsigned char *v)
+{
+  char *c = (char *)v;
+  __display_str(display+pos, c);
+  return strlen(c);
+}
+
+static void update_hour(unsigned char *v)
+{
+  unsigned char hour = *v;
+  hour = (hour + 1) % 24;
+  *v = hour;
+}
+
+static void update_mod60(unsigned char *v)
+{
+  unsigned char s = *v;
+  s = (s + 1) % 60;
+  *v = s;
+}
+
+static void update_day(unsigned char *v)
+{
+  if (*v++ > 31)
+    *v = 1;
+}
+
+static void update_month(unsigned char *v)
+{
+  if (*v++ > 12)
+    *v = 1;
+}
+
+static void update_year(unsigned char *v)
+{
+  if (*v++ > 99)
+    *v = 0;
+}
+
+#define BRITE_MIN	30
+#define BRITE_MAX	90
+#define BRITE_STEP	5
+
+static void update_brite(unsigned char *v)
+{
+  unsigned char new = *v;
+
+  new += BRITE_STEP;
+  if (new < BRITE_MIN)
+    new = BRITE_MIN;
+  if (new > BRITE_MAX)
+    new = BRITE_MAX;
+
+  *v = new;
+}
+
+static unsigned char show_vol(unsigned char pos, unsigned char *v)
+{
+  if (*v)
+    __display_str(display+pos, "high");
+  else
+    __display_str(display+pos, " low");
+
+  return 4;
+}
+
+static void update_toggle(unsigned char *v)
+{
+  *v = !*v;
+}  
+
+static unsigned char show_region(unsigned char pos, unsigned char *v)
+{
+  if (*v == REGION_US)
+    __display_str(display+pos, "usa-12hr");
+  else
+    __display_str(display+pos, "eur-24hr");
+
+  return 8;
+}
+
+static struct menu_state {
+  union {
+    struct timedate timedate;
+    unsigned char val;
+  };
+
+  unsigned char nfields;
+  struct field fields[5];
+} menu_state;
+
+static const struct field alarm_fields[] PROGMEM = {
+  { show_num, update_hour, &menu_state.timedate.time_h },
+  { show_dash, NULL },
+  { show_num, update_mod60, &menu_state.timedate.time_m },
+};
+
+static const struct field time_fields[] PROGMEM = {
+  { show_num, update_hour, &menu_state.timedate.time_h },
+  { show_space, NULL },
+  { show_num, update_mod60, &menu_state.timedate.time_m },
+  { show_space, NULL },
+  { show_num, update_mod60, &menu_state.timedate.time_s },
+};
+
+static const struct field us_date_fields[] PROGMEM = {
+  { show_num, update_month, &menu_state.timedate.date_m },
+  { show_dash, NULL },
+  { show_num, update_day, &menu_state.timedate.date_d },
+  { show_dash, NULL },
+  { show_num, update_year, &menu_state.timedate.date_y },
+};
+
+static const struct field euro_date_fields[] PROGMEM = {
+  { show_num, update_day, &menu_state.timedate.date_d },
+  { show_dash, NULL },
+  { show_num, update_month, &menu_state.timedate.date_m },
+  { show_dash, NULL },
+  { show_num, update_year, &menu_state.timedate.date_y },
+};
+
+static const struct field brite_fields[] PROGMEM = {
+  { show_str, NULL, (unsigned char *)"brite " },
+  { show_num, update_brite, &menu_state.val },
+};
+
+static const struct field vol_fields[] PROGMEM = {
+  { show_str, NULL, (unsigned char *)"vol " },
+  { show_vol, update_toggle, &menu_state.val },
+};
+
+static const struct field region_fields[] PROGMEM = {
+  { show_region, update_toggle, &menu_state.val },
+};
+
+#define NELEM(a)	(sizeof(a) / sizeof(*a))
+static void copy_fields(const struct field PROGMEM *fields, unsigned int nelem)
+{
+  memcpy_P(menu_state.fields, fields, nelem * sizeof(struct field));
+  menu_state.nfields = nelem;
+}
+
+static void get_alarm(void)
+{
+  copy_fields(alarm_fields, NELEM(alarm_fields));
+  menu_state.timedate.time_h = alarm_h;
+  menu_state.timedate.time_m = alarm_m;
+}
+
+static void store_alarm(void)
+{
+  alarm_h = menu_state.timedate.time_h;
+  alarm_m = menu_state.timedate.time_m;
+
+  eeprom_write_byte((uint8_t *)EE_ALARM_HOUR, alarm_h);
+  eeprom_write_byte((uint8_t *)EE_ALARM_MIN, alarm_m);
+}
+
+static void get_time(void)
+{
+  copy_fields(time_fields, NELEM(time_fields));
+  menu_state.timedate = timedate;
+}
+
+static void store_time(void)
+{
+  timedate = menu_state.timedate;
+  timeunknown = 0;
+
+  eeprom_write_byte((uint8_t *)EE_HOUR, timedate.time_h);
+  eeprom_write_byte((uint8_t *)EE_MIN, timedate.time_m);
+}
+
+static void get_date(void)
+{
+  menu_state.timedate = timedate;
+
+  if (region == REGION_US) {
+    copy_fields(us_date_fields, NELEM(us_date_fields));
+  } else {
+    copy_fields(euro_date_fields, NELEM(euro_date_fields));
+  }
+}
+
+static void store_date(void)
+{
+  timedate.date_d = menu_state.timedate.date_d;
+  timedate.date_m = menu_state.timedate.date_m;
+  timedate.date_y = menu_state.timedate.date_y;
+
+  eeprom_write_byte((uint8_t *)EE_DAY, timedate.date_d);    
+  eeprom_write_byte((uint8_t *)EE_MONTH, timedate.date_m);    
+  eeprom_write_byte((uint8_t *)EE_YEAR, timedate.date_y);    
+}
+
+static void get_brite(void)
+{
+  copy_fields(brite_fields, NELEM(brite_fields));
+  menu_state.val = eeprom_read_byte((uint8_t *)EE_BRIGHT);
+}
+
+static void store_brite(void)
+{
+  OCR0A = ((menu_state.val + 4) / 5) * 5;
+  eeprom_write_byte((uint8_t *)EE_BRIGHT, menu_state.val);
+}
+
+static void get_vol(void)
+{
+  copy_fields(vol_fields, NELEM(vol_fields));
+  menu_state.val = eeprom_read_byte((uint8_t *)EE_VOLUME);
+}
+
+static void store_vol(void)
+{
+  eeprom_write_byte((uint8_t *)EE_VOLUME, menu_state.val);
+  speaker_init();
+  beep(4000, 1);
+}
+
+static void get_region(void)
+{
+  copy_fields(region_fields, NELEM(region_fields));
+  menu_state.val = eeprom_read_byte((uint8_t *)EE_REGION);
+}
+
+static void store_region(void)
+{
+  region = menu_state.val;
+  eeprom_write_byte((uint8_t *)EE_REGION, menu_state.val);
+}
+
+static const struct entry mainmenu[] = {
+  { "set alarm", get_alarm, store_alarm },
+  { "set time", get_time, store_time },
+  { "set date", get_date, store_date },
+  { "set brit", get_brite, store_brite },
+  { "set vol", get_vol, store_vol },
+  { "set regn", get_region, store_region },
+};
+
+static void display_entry(char highlight)
+{
+  uint8_t pos, i;
+  const struct field *field = menu_state.fields;
+  unsigned char nfields = menu_state.nfields;
+
+  pos = 1;			/* skip indicators */
+  for (i = 0; i < nfields; i++, field++) {
+    uint8_t len;
+    
+    len = field->display(pos, field->val);
+
+    if (highlight == i) {
+      uint8_t j;
+
+      for(j = pos; j < pos+len; j++)
+	display[j] |= 0x1;
+    }
+    pos += len;
+  }
+
+  for (i = pos; i < DISPLAYSIZE; i++)
+    display[i] = 0;
+}
+
+static uint8_t skip_to_next_input(const struct field *field, unsigned char nfields, uint8_t next)
+{
+  while(next < nfields && field[next].update == NULL)
+    next++;
+
+  return next;
+}
+
+static void show_entry(const struct entry *entry)
+{
+  const struct field *field;
+  uint8_t input, nfields, changed;
+
+  entry->get();
+
+  nfields = menu_state.nfields;
+  input = skip_to_next_input(menu_state.fields, nfields, 0);
+  field = &menu_state.fields[input];
+
+  changed = 1;
+  while (input < nfields) {
+    if (changed) {
+      display_entry(input);
+      changed = 0;
+    }
+
+    if (button_timeout() || button_sample(BUT_MENU))
+      break;
+
+    if (button_sample(BUT_NEXT)) {
+      field->update(field->val);
+      changed = 1;
+    }
+
+    if (button_sample(BUT_SET)) {
+      input = skip_to_next_input(menu_state.fields, nfields, input+1);
+      field = &menu_state.fields[input];
+      changed = 1;
+    }
+  }
+
+  entry->store();
+}
+
+static void show_menu(const struct entry *menu, int nentries)
+{
+  uint8_t entry = 0;
+  uint8_t changed = 1;
+  uint8_t prev = displaymode;
+
+  displaymode = SHOW_MENU;
+  barrier();
+
+  while(entry < nentries) {
+    if (changed) {
+      display_str(menu->prompt);
+      changed = 0;
+    }
+
+    if (button_timeout())
+      break;
+
+    if (button_sample(BUT_MENU)) {
+      entry++;
+      menu++;
+      changed = 1;
+    }
+
+    if (button_sample(BUT_SET)) {
+      show_entry(menu);
+      break;
+    }
+  }
+
+  barrier();
+  displaymode = prev;
+}
 
 void gotosleep(void) {
   // battery
@@ -747,50 +1145,10 @@ int main(void) {
     else 
       display[0] &= ~0x2;
 
-    if (button_sample(BUT_MENU)) {
-      switch(displaymode) {
-      case (SHOW_TIME):
-	displaymode = SET_ALARM;
-	display_str("set alarm");
-	set_alarm();
-	break;
-      case (SET_ALARM):
-	displaymode = SET_TIME;
-	display_str("set time");
-	set_time();
-	timeunknown = 0;
-	break;
-      case (SET_TIME):
-	displaymode = SET_DATE;
-	display_str("set date");
-	set_date();
-	break;
-      case (SET_DATE):
-	displaymode = SET_BRIGHTNESS;
-	display_str("set brit");
-	set_brightness();
-	break;
-      case (SET_BRIGHTNESS):
-	displaymode = SET_VOLUME;
-	display_str("set vol ");
-	set_volume();
-	break;
-      case (SET_VOLUME):
-	displaymode = SET_REGION;
-	display_str("set regn");
-	set_region();
-	break;
-	/*
-      case (SET_REGION):
-	displaymode = SET_SNOOZE;
-	display_str("set snoz");
-	set_snooze();
-	break;
-	*/
-      default:
-	displaymode = SHOW_TIME;
-      }
-    } else if (button_sample(BUT_SET) || button_sample(BUT_NEXT)) {
+    if (button_sample(BUT_MENU))
+      show_menu(mainmenu, NELEM(mainmenu));
+    
+    if (button_sample(BUT_SET) || button_sample(BUT_NEXT)) {
       displaymode = NONE;
       display_date(DAY);
 
@@ -802,480 +1160,6 @@ int main(void) {
     } 
   }
 }
-
-/**************************** SUB-MENUS *****************************/
-
-void set_alarm(void) 
-{
-  uint8_t mode;
-  uint8_t hour, min, sec;
-    
-  hour = min = sec = 0;
-  mode = SHOW_MENU;
-
-  hour = alarm_h;
-  min = alarm_m;
-  sec = 0;
-  
-  while (1) {
-    uint8_t highlight = 0;
-
-    if (button_poll(BUT_MENU)) { // mode change
-      return;
-    }
-    if (button_timeout()) {
-      //timed out!
-      displaymode = SHOW_TIME;     
-      alarm_h = hour;
-      alarm_m = min;
-      eeprom_write_byte((uint8_t *)EE_ALARM_HOUR, alarm_h);    
-      eeprom_write_byte((uint8_t *)EE_ALARM_MIN, alarm_m);    
-      return;
-    }
-
-    if (button_sample(BUT_SET)) {
-      if (mode == SHOW_MENU) {
-	// ok now its selected
-	mode = SET_HOUR;
-	highlight = 1;
-      } else if (mode == SET_HOUR) {
-	mode = SET_MIN;
-	highlight = 4;
-      } else {
-	// done!
-	alarm_h = hour;
-	alarm_m = min;
-	eeprom_write_byte((uint8_t *)EE_ALARM_HOUR, alarm_h);    
-	eeprom_write_byte((uint8_t *)EE_ALARM_MIN, alarm_m);    
-	displaymode = SHOW_TIME;
-	return;
-      }
-    }
-
-    if (button_sample(BUT_NEXT)) {
-      if (mode == SET_HOUR) {
-	hour = (hour+1) % 24;
-	display_alarm(hour, min);
-	highlight = 1;
-      }
-      if (mode == SET_MIN) {
-	min = (min+1) % 60;
-	highlight = 4;
-      }
-    }
-
-    if (highlight && mode != SHOW_MENU) {
-      display_alarm(hour, min);
-      display[highlight+0] |= 0x1;
-      display[highlight+1] |= 0x1;
-    }
-  }
-}
-
-void set_time(void) 
-{
-  uint8_t mode;
-  uint8_t hour, min, sec;
-    
-  hour = timedate.time_h;
-  min = timedate.time_m;
-  sec = timedate.time_s;
-  mode = SHOW_MENU;
-
-  while (1) {
-    uint8_t highlight = 0;
-
-    if (button_poll(BUT_MENU)) { // mode change
-      return;
-    }
-    if (button_timeout()) {
-      //timed out!
-      displaymode = SHOW_TIME;     
-      return;
-    }
-    if (button_sample(BUT_SET)) {
-      switch (mode) {
-      case SHOW_MENU:
-	hour = timedate.time_h;
-	min = timedate.time_m;
-	sec = timedate.time_s;
-
-	// ok now its selected
-	mode = SET_HOUR;
-	highlight = 1;
-	break;
-
-      case SET_HOUR:
-	mode = SET_MIN;
-	highlight = 4;
-	break;
-
-      case SET_MIN:
-	mode = SET_SEC;
-	highlight = 7;
-	break;
-
-      case SET_SEC:
-	// done!
-	timedate.time_h = hour;
-	timedate.time_m = min;
-	timedate.time_s = sec;
-	displaymode = SHOW_TIME;
-	return;
-      }
-    }
-
-    if (button_sample(BUT_NEXT)) {
-      switch (mode) {
-      case SET_HOUR:
-	hour = (hour+1) % 24;
-	highlight = 1;
-	timedate.time_h = hour;
-	eeprom_write_byte((uint8_t *)EE_HOUR, timedate.time_h);
-	break;
-
-      case SET_MIN:
-	min = (min+1) % 60;
-	highlight = 4;
-	timedate.time_m = min;	
-	eeprom_write_byte((uint8_t *)EE_MIN, timedate.time_m);
-	break;
-
-      case SET_SEC:
-	sec = (sec+1) % 60;
-	highlight = 7;
-	timedate.time_s = sec;
-      }
-    }
-
-    if (highlight && mode != SHOW_MENU) {
-      display_time(hour, min, sec);
-      display[highlight+0] |= 0x1;
-      display[highlight+1] |= 0x1;
-    }
-  }
-}
-
-
-
-void set_date(void) {
-  uint8_t mode = SHOW_MENU;
-
-  while (1) {
-    uint8_t highlight = 0;
-
-    if (button_timeout()) {
-      //timed out!
-      displaymode = SHOW_TIME;     
-      return;
-    }
-    if (button_poll(BUT_MENU)) { // mode change
-      return;
-    }
-
-    if (button_sample(BUT_SET)) {
-      if (mode == SHOW_MENU) {
-	// start!
-	if (region == REGION_US) {
-	  mode = SET_MONTH;
-	}
-	else {
-	  DEBUGP("Set day");
-	  mode = SET_DAY;
-	}
-	highlight = 1;
-      } else if (((mode == SET_MONTH) && (region == REGION_US)) ||
-		 ((mode == SET_DAY) && (region == REGION_EU))) {
-	if (region == REGION_US)
-	  mode = SET_DAY;
-	else
-	  mode = SET_MONTH;
-	highlight = 4;
-      } else if (((mode == SET_DAY) && (region == REGION_US)) ||
-		 ((mode == SET_MONTH) && (region == REGION_EU))) {
-	mode = SET_YEAR;
-	highlight = 7;
-      } else {
-	displaymode = NONE;
-	display_date(DATE);
-	delayms(1500);
-	displaymode = SHOW_TIME;
-	return;
-      }
-    }
-
-    if (button_sample(BUT_NEXT)) {
-      switch (mode) {
-      case SET_MONTH:
-	timedate.date_m++;
-	if (timedate.date_m >= 13)
-	  timedate.date_m = 1;
-	display_date(DATE);
-	if (region == REGION_US) {
-	  highlight = 1;
-	} else {
-	  highlight = 4;
-	}
-	eeprom_write_byte((uint8_t *)EE_MONTH, timedate.date_m);    
-	break;
-
-      case SET_DAY:
-	timedate.date_d++;
-	if (timedate.date_d > 31)
-	  timedate.date_d = 1;
-	display_date(DATE);
-
-	if (region == REGION_EU) {
-	  highlight = 1;
-	} else {
-	  highlight = 4;
-	}
-	eeprom_write_byte((uint8_t *)EE_DAY, timedate.date_d);    
-	break;
-
-      case SET_YEAR:
-	timedate.date_y++;
-	timedate.date_y %= 100;
-	highlight = 7;
-	eeprom_write_byte((uint8_t *)EE_YEAR, timedate.date_y);    
-	break;
-      }
-    }
-
-    if (highlight && mode != SHOW_MENU) {
-      display_date(DATE);
-      
-      display[highlight+0] |= 0x1;
-      display[highlight+1] |= 0x1;
-    }
-  }
-}
-
-#define EMIT_DOT	1	/* show "updating" dot */
-#define EMIT_SLZ	2	/* suppress leading zero */
-
-static void __emit_number(uint8_t *disp, uint8_t num, uint8_t flags)
-{
-  uint8_t extra = flags & EMIT_DOT;
-
-  if ((flags & EMIT_SLZ) && num < 10)
-    disp[0] = 0;
-  else
-    disp[0] = pgm_read_byte(numbertable + (num / 10)) | extra;
-  disp[1] = pgm_read_byte(numbertable + (num % 10)) | extra; 
-}
-
-static void emit_number(uint8_t *disp, uint8_t num)
-{
-  __emit_number(disp, num, 0);
-}
-
-static void emit_number_dots(uint8_t *disp, uint8_t num)
-{
-  __emit_number(disp, num, EMIT_DOT);
-}
-
-static void emit_number_slz(uint8_t *disp, uint8_t num)
-{
-  __emit_number(disp, num, EMIT_SLZ);
-}
-
-void set_brightness(void) {
-  uint8_t mode = SHOW_MENU;
-  uint8_t brightness;
-
-  brightness = eeprom_read_byte((uint8_t *)EE_BRIGHT);
-
-  while (1) {
-    if (button_timeout()) {
-      //timed out!
-      displaymode = SHOW_TIME;     
-      eeprom_write_byte((uint8_t *)EE_BRIGHT, brightness);
-      return;
-    }
-    if (button_poll(BUT_MENU)) { // mode change
-      return;
-    }
-    if (button_sample(BUT_SET)) {
-      if (mode == SHOW_MENU) {
-	// start!
-	mode = SET_BRITE;
-	// display brightness
-	display_str("brite ");
-	emit_number_dots(&display[7], brightness);
-      } else {	
-	displaymode = SHOW_TIME;
-	eeprom_write_byte((uint8_t *)EE_BRIGHT, brightness);
-	return;
-      }
-    }
-    if (button_sample(BUT_SET) || button_sample(BUT_NEXT)) {
-      if (mode == SET_BRITE) {
-	brightness += 5;
-	if (brightness > 90)
-	  brightness = 30;
-	emit_number_dots(&display[7], brightness);
-
-	OCR0A = ((brightness + 4) / 5) * 5;
-      }
-    }
-  }
-}
-
-static void show_vol(uint8_t volume)
-{
-  char *str;
-
-  // display volume
-  if (volume) {
-    display_str("vol high");
-    display[5] |= 0x1;
-  } else {
-    display_str("vol  low");
-  }
-  display[6] |= 0x1;
-  display[7] |= 0x1;
-  display[8] |= 0x1;
-}
-
-void set_volume(void) {
-  uint8_t mode = SHOW_MENU;
-  uint8_t volume;
-
-  volume = eeprom_read_byte((uint8_t *)EE_VOLUME);
-
-  while (1) {
-    if (button_timeout()) {
-      //timed out!
-      displaymode = SHOW_TIME;     
-      return;
-    }
-    if (button_poll(BUT_MENU)) { // mode change
-      return;
-    }
-    if (button_sample(BUT_SET)) {
-      if (mode == SHOW_MENU) {
-	// start!
-	mode = SET_VOL;
-	show_vol(volume);
-      } else {	
-	displaymode = SHOW_TIME;
-	return;
-      }
-    }
-    if (button_sample(BUT_NEXT)) {
-      if (mode == SET_VOL) {
-	volume = !volume;
-	show_vol(volume);
-	eeprom_write_byte((uint8_t *)EE_VOLUME, volume);
-	speaker_init();
-	beep(4000, 1);
-      }
-    }
-  }
-}
-
-
-
-
-void set_region(void) {
-  uint8_t mode = SHOW_MENU;
-
-  region = eeprom_read_byte((uint8_t *)EE_REGION);
-
-  while (1) {
-    if (button_timeout()) {
-      //timed out!
-      displaymode = SHOW_TIME;     
-      return;
-    }
-    if (button_poll(BUT_MENU)) { // mode change
-      return;
-    }
-    if (button_sample(BUT_SET)) {
-      if (mode == SHOW_MENU) {
-	// start!
-	mode = SET_REG;
-	// display region
-	if (region == REGION_US) {
-	  display_str("usa-12hr");
-	} else {
-	  display_str("eur-24hr");
-	}
-      } else {	
-	displaymode = SHOW_TIME;
-	return;
-      }
-    }
-    if (button_sample(BUT_NEXT)) {
-      if (mode == SET_REG) {
-	region = !region;
-	if (region == REGION_US) {
-	  display_str("usa-12hr");
-	} else {
-	  display_str("eur-24hr");
-	}
-	eeprom_write_byte((uint8_t *)EE_REGION, region);
-      }
-    }
-  }
-}
-
-
-/*
-void set_snooze(void) {
-  uint8_t mode = SHOW_MENU;
-  uint8_t snooze;
-
-  timeoutcounter = INACTIVITYTIMEOUT;;  
-  snooze = eeprom_read_byte((uint8_t *)EE_SNOOZE);
-
-  while (1) {
-    if (just_pressed || pressed) {
-      timeoutcounter = INACTIVITYTIMEOUT;;  
-      // timeout w/no buttons pressed after 3 seconds?
-    } else if (!timeoutcounter) {
-      //timed out!
-      displaymode = SHOW_TIME;     
-      return;
-    }
-    if (just_pressed & BUT_MENU) { // mode change
-      return;
-    }
-    if (just_pressed & BUT_SET) {
-
-      just_pressed = 0;
-      if (mode == SHOW_MENU) {
-	// start!
-	mode = SET_SNOOZE;
-	// display snooze
-	display_str("   minut");
-	display[1] = pgm_read_byte(numbertable_p + (snooze / 10)) | 0x1;
-	display[2] = pgm_read_byte(numbertable_p + (snooze % 10)) | 0x1;
-      } else { 
-	displaymode = SHOW_TIME;
-	return;
-      }
-    }
-    if ((just_pressed & BUT_NEXT) || (pressed & BUT_NEXT)) {
-      just_pressed = 0;
-      if (mode == SET_SNOOZE) {
-        snooze ++;
-	if (snooze >= 100)
-	  snooze = 0;
-	display[1] = pgm_read_byte(numbertable_p + (snooze / 10)) | 0x1;
-	display[2] = pgm_read_byte(numbertable_p + (snooze % 10)) | 0x1;
-	eeprom_write_byte((uint8_t *)EE_SNOOZE, snooze);
-      }
-
-      if (pressed & BUT_NEXT)
-	delayms(75);
-
-    }
-  }
-}
-*/
-
 
 /**************************** RTC & ALARM *****************************/
 void clock_init(void) {
@@ -1588,27 +1472,32 @@ void display_alarm(uint8_t h, uint8_t m){
 }
 
 // display words (menus, prompts, etc)
-void display_str(char *s) {
+static void __display_str(uint8_t *disp, const char *s) {
   uint8_t i;
 
-  // don't use the lefthand dot/slash digit
-  display[0] = 0;
-
   // up to 8 characters
-  for (i=1; i<9; i++) {
+  for (i=1; i<9; i++, disp++) {
     // check for null-termination
     if (s[i-1] == 0)
       return;
 
     // Numbers and leters are looked up in the font table!
     if ((s[i-1] >= 'a') && (s[i-1] <= 'z')) {
-      display[i] =  pgm_read_byte(alphatable + s[i-1] - 'a');
+      *disp =  pgm_read_byte(alphatable + s[i-1] - 'a');
     } else if ((s[i-1] >= '0') && (s[i-1] <= '9')) {
-      display[i] =  pgm_read_byte(numbertable + s[i-1] - '0');
+      *disp =  pgm_read_byte(numbertable + s[i-1] - '0');
     } else {
-      display[i] = 0;      // spaces and other stuff are ignored :(
+      *disp = 0;      // spaces and other stuff are ignored :(
     }
   }
+}
+
+void display_str(const char *s)
+{
+  // don't use the lefthand dot/slash digit
+  display[0] = 0;
+
+  __display_str(display+1, s);
 }
 
 /************************* LOW LEVEL DISPLAY ************************/
@@ -1663,4 +1552,3 @@ void spi_xfer(uint8_t c) {
   SPDR = c;
   while (! (SPSR & _BV(SPIF)));
 }
-
