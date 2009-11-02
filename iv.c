@@ -47,18 +47,23 @@ uint8_t region = REGION_US;
 static void __display_str(uint8_t *disp, const char *s);
 
 struct timedate {
-  uint8_t time_s, time_m, time_h;
-  uint8_t date_m, date_d, date_y;
+  struct time {
+    uint8_t s, m, h;
+  } time;
+  struct date {
+    uint8_t m, d, y;
+  } date;
 };
 
 // These variables store the current time and date.
 volatile struct timedate timedate;
 
 // how loud is the speaker supposed to be?
-volatile uint8_t volume;
+uint8_t volume;
 
 // whether the alarm is on, going off, and alarm time
-volatile uint8_t alarm_on, alarming, alarm_h, alarm_m;
+volatile uint8_t alarm_on, alarming;
+volatile struct time alarm;
 
 // what is being displayed on the screen? (eg time, date, menu...)
 volatile uint8_t displaymode;
@@ -408,7 +413,11 @@ SIGNAL(SIG_PIN_CHANGE0) {
   PCMSK0 = _BV(PCINT0);
 }
 
-// this goes off once a second
+/*
+ * This goes off once a second, driven by the external 32.768kHz
+ * crystal.  It leaves interrupts disabled so it can never itself be
+ * interrupted.
+ */
 SIGNAL (TIMER2_OVF_vect) {
   struct timedate td;
   CLKPR = _BV(CLKPCE);  //MEME
@@ -416,28 +425,28 @@ SIGNAL (TIMER2_OVF_vect) {
 
   td = timedate;
 
-  td.time_s++;             // one second has gone by
+  td.time.s++;             // one second has gone by
 
   // a minute!
-  if (td.time_s >= 60) {
-    td.time_s = 0;
-    td.time_m++;
+  if (td.time.s >= 60) {
+    td.time.s = 0;
+    td.time.m++;
   }
 
   // an hour...
-  if (td.time_m >= 60) {
-    td.time_m = 0;
-    td.time_h++; 
+  if (td.time.m >= 60) {
+    td.time.m = 0;
+    td.time.h++; 
     // lets write the time to the EEPROM
-    eeprom_write_byte((uint8_t *)EE_HOUR, td.time_h);
-    eeprom_write_byte((uint8_t *)EE_MIN, td.time_m);
+    eeprom_write_byte((uint8_t *)EE_HOUR, td.time.h);
+    eeprom_write_byte((uint8_t *)EE_MIN, td.time.m);
   }
 
   // a day....
-  if (td.time_h >= 24) {
-    td.time_h = 0;
-    td.date_d++;
-    eeprom_write_byte((uint8_t *)EE_DAY, td.date_d);
+  if (td.time.h >= 24) {
+    td.time.h = 0;
+    td.date.d++;
+    eeprom_write_byte((uint8_t *)EE_DAY, td.date.d);
   }
 
   /*
@@ -453,20 +462,20 @@ SIGNAL (TIMER2_OVF_vect) {
 
   // a full month!
   // we check the leapyear and date to verify when its time to roll over months
-  if ((td.date_d > 31) ||
-      ((td.date_d == 31) && ((td.date_m == 4)||(td.date_m == 6)||(td.date_m == 9)||(td.date_m == 11))) ||
-      ((td.date_d == 30) && (td.date_m == 2)) ||
-      ((td.date_d == 29) && (td.date_m == 2) && !leapyear(2000+td.date_y))) {
-    td.date_d = 1;
-    td.date_m++;
-    eeprom_write_byte((uint8_t *)EE_MONTH, td.date_m);
+  if ((td.date.d > 31) ||
+      ((td.date.d == 31) && ((td.date.m == 4)||(td.date.m == 6)||(td.date.m == 9)||(td.date.m == 11))) ||
+      ((td.date.d == 30) && (td.date.m == 2)) ||
+      ((td.date.d == 29) && (td.date.m == 2) && !leapyear(2000+td.date.y))) {
+    td.date.d = 1;
+    td.date.m++;
+    eeprom_write_byte((uint8_t *)EE_MONTH, td.date.m);
   }
   
   // HAPPY NEW YEAR!
-  if (td.date_m >= 13) {
-    td.date_y++;
-    td.date_m = 1;
-    eeprom_write_byte((uint8_t *)EE_YEAR, td.date_y);
+  if (td.date.m >= 13) {
+    td.date.y++;
+    td.date.m = 1;
+    eeprom_write_byte((uint8_t *)EE_YEAR, td.date.y);
   }
   
   timedate = td;
@@ -475,7 +484,7 @@ SIGNAL (TIMER2_OVF_vect) {
   if (sleepmode)
     return;
    
-  if (alarm_on && (alarm_h == timedate.time_h) && (alarm_m == timedate.time_m) && (timedate.time_s == 0)) {
+  if (alarm_on && (alarm.h == timedate.time.h) && (alarm.m == timedate.time.m) && (timedate.time.s == 0)) {
     DEBUGP("alarm on!");
     alarming = 1;
     snoozetimer = 0;
@@ -506,8 +515,8 @@ SIGNAL(SIG_COMPARATOR) {
       BOOST_PORT &= ~_BV(BOOST); // pull boost fet low
       SPCR  &= ~_BV(SPE); // turn off spi
       if (restored) {
-	eeprom_write_byte((uint8_t *)EE_MIN, timedate.time_m);
-	eeprom_write_byte((uint8_t *)EE_SEC, timedate.time_s);
+	eeprom_write_byte((uint8_t *)EE_MIN, timedate.time.m);
+	eeprom_write_byte((uint8_t *)EE_SEC, timedate.time.s);
       }
       DEBUGP("z");
       TCCR0B = 0; // no boost
@@ -520,8 +529,8 @@ SIGNAL(SIG_COMPARATOR) {
     //DEBUGP("LOW");
     if (sleepmode) {
       if (restored) {
-	eeprom_write_byte((uint8_t *)EE_MIN, timedate.time_m);
-	eeprom_write_byte((uint8_t *)EE_SEC, timedate.time_s);
+	eeprom_write_byte((uint8_t *)EE_MIN, timedate.time.m);
+	eeprom_write_byte((uint8_t *)EE_SEC, timedate.time.s);
       }
       DEBUGP("WAKERESET"); 
       app_start();
@@ -667,7 +676,8 @@ static unsigned char show_region(unsigned char pos, unsigned char *v)
 
 static struct menu_state {
   union {
-    struct timedate timedate;
+    struct time time;
+    struct date date;
     unsigned char val;
   };
 
@@ -676,33 +686,33 @@ static struct menu_state {
 } menu_state;
 
 static const struct field alarm_fields[] PROGMEM = {
-  { show_num, update_hour, &menu_state.timedate.time_h },
+  { show_num, update_hour, &menu_state.time.h },
   { show_dash, NULL },
-  { show_num, update_mod60, &menu_state.timedate.time_m },
+  { show_num, update_mod60, &menu_state.time.m },
 };
 
 static const struct field time_fields[] PROGMEM = {
-  { show_num, update_hour, &menu_state.timedate.time_h },
+  { show_num, update_hour, &menu_state.time.h },
   { show_space, NULL },
-  { show_num, update_mod60, &menu_state.timedate.time_m },
+  { show_num, update_mod60, &menu_state.time.m },
   { show_space, NULL },
-  { show_num, update_mod60, &menu_state.timedate.time_s },
+  { show_num, update_mod60, &menu_state.time.s },
 };
 
 static const struct field us_date_fields[] PROGMEM = {
-  { show_num, update_month, &menu_state.timedate.date_m },
+  { show_num, update_month, &menu_state.date.m },
   { show_dash, NULL },
-  { show_num, update_day, &menu_state.timedate.date_d },
+  { show_num, update_day, &menu_state.date.d },
   { show_dash, NULL },
-  { show_num, update_year, &menu_state.timedate.date_y },
+  { show_num, update_year, &menu_state.date.y },
 };
 
 static const struct field euro_date_fields[] PROGMEM = {
-  { show_num, update_day, &menu_state.timedate.date_d },
+  { show_num, update_day, &menu_state.date.d },
   { show_dash, NULL },
-  { show_num, update_month, &menu_state.timedate.date_m },
+  { show_num, update_month, &menu_state.date.m },
   { show_dash, NULL },
-  { show_num, update_year, &menu_state.timedate.date_y },
+  { show_num, update_year, &menu_state.date.y },
 };
 
 static const struct field brite_fields[] PROGMEM = {
@@ -729,37 +739,35 @@ static void copy_fields(const struct field PROGMEM *fields, unsigned int nelem)
 static void get_alarm(void)
 {
   copy_fields(alarm_fields, NELEM(alarm_fields));
-  menu_state.timedate.time_h = alarm_h;
-  menu_state.timedate.time_m = alarm_m;
+  menu_state.time = alarm;
 }
 
 static void store_alarm(void)
 {
-  alarm_h = menu_state.timedate.time_h;
-  alarm_m = menu_state.timedate.time_m;
+  alarm = menu_state.time;
 
-  eeprom_write_byte((uint8_t *)EE_ALARM_HOUR, alarm_h);
-  eeprom_write_byte((uint8_t *)EE_ALARM_MIN, alarm_m);
+  eeprom_write_byte((uint8_t *)EE_ALARM_HOUR, alarm.h);
+  eeprom_write_byte((uint8_t *)EE_ALARM_MIN, alarm.m);
 }
 
 static void get_time(void)
 {
   copy_fields(time_fields, NELEM(time_fields));
-  menu_state.timedate = timedate;
+  menu_state.time = timedate.time;
 }
 
 static void store_time(void)
 {
-  timedate = menu_state.timedate;
+  timedate.time = menu_state.time;
   timeunknown = 0;
 
-  eeprom_write_byte((uint8_t *)EE_HOUR, timedate.time_h);
-  eeprom_write_byte((uint8_t *)EE_MIN, timedate.time_m);
+  eeprom_write_byte((uint8_t *)EE_HOUR, menu_state.time.h);
+  eeprom_write_byte((uint8_t *)EE_MIN, menu_state.time.m);
 }
 
 static void get_date(void)
 {
-  menu_state.timedate = timedate;
+  menu_state.date = timedate.date;
 
   if (region == REGION_US) {
     copy_fields(us_date_fields, NELEM(us_date_fields));
@@ -770,13 +778,11 @@ static void get_date(void)
 
 static void store_date(void)
 {
-  timedate.date_d = menu_state.timedate.date_d;
-  timedate.date_m = menu_state.timedate.date_m;
-  timedate.date_y = menu_state.timedate.date_y;
+  timedate.date = menu_state.date;
 
-  eeprom_write_byte((uint8_t *)EE_DAY, timedate.date_d);    
-  eeprom_write_byte((uint8_t *)EE_MONTH, timedate.date_m);    
-  eeprom_write_byte((uint8_t *)EE_YEAR, timedate.date_y);    
+  eeprom_write_byte((uint8_t *)EE_DAY, timedate.date.d);    
+  eeprom_write_byte((uint8_t *)EE_MONTH, timedate.date.m);    
+  eeprom_write_byte((uint8_t *)EE_YEAR, timedate.date.y);    
 }
 
 static void get_brite(void)
@@ -799,6 +805,7 @@ static void get_vol(void)
 
 static void store_vol(void)
 {
+  volume = menu_state.val;
   eeprom_write_byte((uint8_t *)EE_VOLUME, menu_state.val);
   speaker_init();
   beep(4000, 1);
@@ -1134,10 +1141,10 @@ int main(void) {
       continue;
     }
 
-    if (timeunknown && (timedate.time_s % 2))
+    if (timeunknown && (timedate.time.s % 2))
       display_str("        ");
     else
-      display_time(timedate.time_h, timedate.time_m, timedate.time_s);
+      display_time(timedate.time.h, timedate.time.m, timedate.time.s);
     
     /* snoozetimer == 0 if we're not alarming */
     if (alarm_on && (snoozetimer % 2) == 0)
@@ -1165,9 +1172,9 @@ int main(void) {
 void clock_init(void) {
   // we store the time in EEPROM when switching from power modes so its
   // reasonable to start with whats in memory
-  timedate.time_h = eeprom_read_byte((uint8_t *)EE_HOUR) % 24;
-  timedate.time_m = eeprom_read_byte((uint8_t *)EE_MIN) % 60;
-  timedate.time_s = eeprom_read_byte((uint8_t *)EE_SEC) % 60;
+  timedate.time.h = eeprom_read_byte((uint8_t *)EE_HOUR) % 24;
+  timedate.time.m = eeprom_read_byte((uint8_t *)EE_MIN) % 60;
+  timedate.time.s = eeprom_read_byte((uint8_t *)EE_SEC) % 60;
 
   /*
     // if you're debugging, having the makefile set the right
@@ -1178,12 +1185,12 @@ void clock_init(void) {
   */
 
   // Set up the stored alarm time and date
-  alarm_m = eeprom_read_byte((uint8_t *)EE_ALARM_MIN) % 60;
-  alarm_h = eeprom_read_byte((uint8_t *)EE_ALARM_HOUR) % 24;
+  alarm.m = eeprom_read_byte((uint8_t *)EE_ALARM_MIN) % 60;
+  alarm.h = eeprom_read_byte((uint8_t *)EE_ALARM_HOUR) % 24;
 
-  timedate.date_y = eeprom_read_byte((uint8_t *)EE_YEAR) % 100;
-  timedate.date_m = eeprom_read_byte((uint8_t *)EE_MONTH) % 13;
-  timedate.date_d = eeprom_read_byte((uint8_t *)EE_DAY) % 32;
+  timedate.date.y = eeprom_read_byte((uint8_t *)EE_YEAR) % 100;
+  timedate.date.m = eeprom_read_byte((uint8_t *)EE_MONTH) % 13;
+  timedate.date.d = eeprom_read_byte((uint8_t *)EE_DAY) % 32;
 
   restored = 1;
 
@@ -1218,7 +1225,7 @@ void setalarmstate(void) {
       displaymode = SHOW_SNOOZE;
       delayms(1000);
       // show the current alarm time set
-      display_alarm(alarm_h, alarm_m);
+      display_alarm(alarm.h, alarm.m);
       delayms(1000);
       // after a second, go back to clock mode
       displaymode = SHOW_TIME;
@@ -1344,15 +1351,15 @@ void display_date(uint8_t style) {
 
     if (region == REGION_US) {
       // mm-dd-yy
-      emit_number_slz(&display[1], timedate.date_m);
-      emit_number_slz(&display[4], timedate.date_d);
+      emit_number_slz(&display[1], timedate.date.m);
+      emit_number_slz(&display[4], timedate.date.d);
     } else {
       // dd-mm-yy
-      emit_number_slz(&display[1], timedate.date_d);
-      emit_number_slz(&display[4], timedate.date_m);
+      emit_number_slz(&display[1], timedate.date.d);
+      emit_number_slz(&display[4], timedate.date.m);
     }
     // the yy part is the same
-    emit_number(&display[7], timedate.date_y);
+    emit_number(&display[7], timedate.date.y);
   } else if (style == DAY) {
     // This is more "Sunday June 21" style
 
@@ -1361,13 +1368,13 @@ void display_date(uint8_t style) {
 
     // Calculate day of the week
     
-    month = timedate.date_m;
-    year = 2000 + timedate.date_y;
-    if (timedate.date_m < 3)  {
+    month = timedate.date.m;
+    year = 2000 + timedate.date.y;
+    if (timedate.date.m < 3)  {
       month += 12;
       year -= 1;
     }
-    dotw = (timedate.date_d + (2 * month) + (6 * (month+1)/10) + year + (year/4) - (year/100) + (year/400) + 1) % 7;
+    dotw = (timedate.date.d + (2 * month) + (6 * (month+1)/10) + year + (year/4) - (year/100) + (year/400) + 1) % 7;
 
     // Display the day first
     display[8] = display[7] = 0;
@@ -1393,7 +1400,7 @@ void display_date(uint8_t style) {
 
     // Then display the month and date
     display[6] = display[5] = display[4] = 0;
-    switch (timedate.date_m) {
+    switch (timedate.date.m) {
     case 1:
       display_str("jan"); break;
     case 2:
@@ -1419,7 +1426,7 @@ void display_date(uint8_t style) {
     case 12:
       display_str("decem"); break;
     }
-    emit_number_slz(&display[7], timedate.date_d);
+    emit_number_slz(&display[7], timedate.date.d);
   }
 }
 
