@@ -1371,43 +1371,44 @@ int main(void) {
     /* recheck alarm switch */
     setalarmstate();
 
-    /* If the alarm is on then any button-press will kick off snooze */
-    if (alarming && (button_sample(BUT_MENU) ||
-		     button_sample(BUT_SET) ||
-		     button_sample(BUT_NEXT))) {
-      setsnooze();
-      goto again;
-    }
-
     if (timeunknown && (timedate.time.s % 2))
       display_str("        ");
     else
       display_time();
-    
-    /* flash display brightness while alarming (even while snoozing) */
-    if (alarming) {
-      if (timedate.time.s % 2)
-	OCR0A = BRITE_MAX;
-      else
-	OCR0A = BRITE_MIN;
-    } else
-      OCR0A = eeprom_read_byte((uint8_t *)EE_BRIGHT);
 
     if (alarm_on)
       display[0] |= 0x2;
     else 
       display[0] &= ~0x2;
 
-    if (button_sample(BUT_MENU))
-      show_menu(mainmenu, NELEM(mainmenu));
-    
-    if (button_sample(BUT_SET) || button_sample(BUT_NEXT)) {
-      display_date(DAY);
+    if (alarming) {
+      /* While alarming, any button-press will kick off snooze */
+      if (button_sample(BUT_MENU) ||
+	  button_sample(BUT_SET) ||
+	  button_sample(BUT_NEXT))
+	setsnooze();
 
-      kickthedog();
-      delayms(1500);
-      kickthedog();
-    } 
+      /* flash display brightness while alarming (even while snoozing) */
+      if (timedate.time.s % 2)
+	OCR0A = BRITE_MAX;
+      else
+	OCR0A = BRITE_MIN;
+
+    } else {
+      /* No alarm, normal brightness and button operation */
+      OCR0A = eeprom_read_byte((uint8_t *)EE_BRIGHT);
+
+      if (button_sample(BUT_MENU))
+	show_menu(mainmenu, NELEM(mainmenu));
+    
+      if (!alarming && (button_sample(BUT_SET) || button_sample(BUT_NEXT))) {
+	display_date(DAY);
+
+	kickthedog();
+	delayms(1500);
+	kickthedog();
+      } 
+    }
 
     /*
      * Sleep until something interesting happens (ie, an interrupt;
