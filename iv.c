@@ -91,23 +91,42 @@ uint16_t alarmdiv = 0;
 // How long we have been snoozing
 uint16_t snoozetimer = 0;
 
+/* 
+ * Idle MCU while waiting for interrupts; enables interrupts, so can
+ * be used safely where interrupts are disabled (that is, there's no
+ * race window between enabling interrupts and going to sleep).
+ */
 static inline void sleep(void)
 {
-  asm volatile("sleep" : : : "memory");
+  asm volatile("sei; sleep" : : : "memory");
 }
+
+#define barrier()	asm("" : : : "memory")
 
 // We have a non-blocking delay function, milliseconds is updated by
 // an interrupt
 volatile uint16_t milliseconds = 0;
+
+static uint16_t now(void)
+{
+  volatile uint8_t *ms = (uint8_t *)&milliseconds;
+  uint8_t h, l;
+
+  do {
+    h = ms[1];
+    barrier();
+    l = ms[0];
+    barrier();
+  } while(h != ms[1]);
+
+  return (h << 8) | l;
+}
+
 void delayms(uint16_t ms) {
-  milliseconds = 0;
-  cli();
-  while (milliseconds < ms) {
-    sei();
+  uint16_t start = now();
+
+  while ((now() - start) < ms)
     sleep();
-    cli();
-  }
-  sei();
 }
 
 // When the alarm is going off, pressing a button turns on snooze mode
@@ -541,7 +560,7 @@ int main(void) {
   mcustate = MCUSR;
   MCUSR = 0;
 
-  SMCR |= _BV(SM1) | _BV(SM0) | _BV(SE); // sleep mode
+  SMCR = _BV(SM1) | _BV(SM0) | _BV(SE); // sleep mode
 
   wdt_disable();
   // now turn it back on... 2 second time out
