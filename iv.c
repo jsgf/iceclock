@@ -56,14 +56,14 @@ struct timedate {
 };
 
 // These variables store the current time and date.
-volatile struct timedate timedate;
+struct timedate timedate;
 
 // how loud is the speaker supposed to be?
 uint8_t volume;
 
 // whether the alarm is on, going off, and alarm time
-volatile uint8_t alarm_on, alarming;
-volatile struct time alarm;
+static uint8_t alarm_on, alarming;
+struct time alarm;
 
 // what is being displayed on the screen? (eg time, date, menu...)
 volatile uint8_t displaymode;
@@ -71,8 +71,8 @@ volatile uint8_t displaymode;
 // are we in low power sleep mode?
 volatile uint8_t sleepmode = 0;
 
-uint8_t timeunknown = 0;        // MEME
-volatile uint8_t restored = 0;
+static uint8_t timeunknown = 0;        // MEME
+static uint8_t restored = 0;
 
 // Our display buffer, which is updated to show the time/date/etc
 // and is multiplexed onto the tube
@@ -484,7 +484,7 @@ SIGNAL (TIMER2_OVF_vect) {
   if (sleepmode)
     return;
    
-  if (alarm_on && (alarm.h == timedate.time.h) && (alarm.m == timedate.time.m) && (timedate.time.s == 0)) {
+  if (alarm_on && (alarm.h == td.time.h) && (alarm.m == td.time.m) && (td.time.s == 0)) {
     DEBUGP("alarm on!");
     alarming = 1;
     snoozetimer = 0;
@@ -753,12 +753,19 @@ static void store_alarm(void)
 static void get_time(void)
 {
   copy_fields(time_fields, NELEM(time_fields));
+  barrier();
   menu_state.time = timedate.time;
 }
 
 static void store_time(void)
 {
+  /* disable interrupts to make sure timedate gets updated atomically
+   * (we're resetting time, so it doesn't matter if we hold off
+   * time-update for a little while) */
+  cli();
   timedate.time = menu_state.time;
+  sei();
+
   timeunknown = 0;
 
   eeprom_write_byte((uint8_t *)EE_HOUR, menu_state.time.h);
@@ -778,7 +785,12 @@ static void get_date(void)
 
 static void store_date(void)
 {
+  /* A bit ultra-paranoid: make sure the date doesn't get corrupted
+   * just in case they're setting the time at precisely midnight and
+   * this assignment is interrupted by time update. */
+  cli();
   timedate.date = menu_state.date;
+  sei();
 
   eeprom_write_byte((uint8_t *)EE_DAY, timedate.date.d);    
   eeprom_write_byte((uint8_t *)EE_MONTH, timedate.date.m);    
@@ -793,7 +805,7 @@ static void get_brite(void)
 
 static void store_brite(void)
 {
-  OCR0A = ((menu_state.val + 4) / 5) * 5;
+  OCR0A = menu_state.val;
   eeprom_write_byte((uint8_t *)EE_BRIGHT, menu_state.val);
 }
 
@@ -806,6 +818,7 @@ static void get_vol(void)
 static void store_vol(void)
 {
   volume = menu_state.val;
+
   eeprom_write_byte((uint8_t *)EE_VOLUME, menu_state.val);
   speaker_init();
   beep(4000, 1);
@@ -1138,7 +1151,7 @@ int main(void) {
 		     button_sample(BUT_SET) ||
 		     button_sample(BUT_NEXT))) {
       setsnooze();
-      continue;
+      goto again;
     }
 
     if (timeunknown && (timedate.time.s % 2))
@@ -1165,6 +1178,15 @@ int main(void) {
 
       displaymode = SHOW_TIME;     
     } 
+
+    /*
+     * Sleep until something interesting happens (ie, an interrupt;
+     * all changes are interrupt driven).  This is also a barrier, so
+     * it will force all the global variables to be reloaded for the
+     * next iteration.
+     */
+  again:
+    sleep();
   }
 }
 
