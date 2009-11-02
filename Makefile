@@ -295,6 +295,8 @@ program: $(TARGET).hex $(TARGET).eep
 	@echo $(MSG_SYMBOL_TABLE) $@
 	avr-nm -n $< > $@
 
+%.pdf: %.dot
+	dot -Tpdf $< > $@
 
 
 # Link: create ELF output file from object files.
