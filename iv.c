@@ -811,12 +811,12 @@ static unsigned char show_secmode(unsigned char pos, unsigned char *v)
 
   switch (*v) {
   default:
-  case SEC_FULL:	ret = "full"; break;
-  case SEC_DIAL:	ret = "dial"; break;
-  case SEC_AMPM:	ret = "ampm"; break;
-  case SEC_NONE:	ret = "none"; break;
+  case SEC_FULL:	ret = PSTR("full"); break;
+  case SEC_DIAL:	ret = PSTR("dial"); break;
+  case SEC_AMPM:	ret = PSTR("ampm"); break;
+  case SEC_NONE:	ret = PSTR("none"); break;
   }
-  return __display_str(display+pos, ret);
+  return show_str(pos, (unsigned char *)ret);
 }
 
 static void update_secmode(unsigned char *v)
