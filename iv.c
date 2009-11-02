@@ -620,9 +620,6 @@ static void emit_number_slz(uint8_t *disp, uint8_t num)
   __emit_number(disp, num, EMIT_SLZ);
 }
 
-
-uint32_t t;
-
 struct field {
   unsigned char (*display)(unsigned char pos, unsigned char *val);
   void (*update)(unsigned char *val);
@@ -1691,7 +1688,7 @@ void setdisplay(uint8_t digit, uint8_t segments) {
   // Set the individual segments for this digit
   for (i=0; i<8; i++) {
     if (segments & _BV(i)) {
-      t = 1;
+      uint32_t t = 1;
       t <<= pgm_read_byte(segmenttable + i);
       d |= t;
     }
