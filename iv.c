@@ -582,11 +582,37 @@ static unsigned char show_num(unsigned char pos, unsigned char *v)
   return 2;
 }
 
+static unsigned char show_hour(unsigned char pos, unsigned char *v)
+{
+  uint8_t h = *v;
+
+  if (region == REGION_US) {
+    emit_number_slz(&display[pos], ((h+11) % 12) + 1);
+    if (h >= 12)
+      display[0] |= 0x1;	/* pm notice */
+    else
+      display[0] &= ~0x1;	/* am */
+  } else
+    emit_number(&display[pos], h);
+  return 2;
+}
+
 static unsigned char show_str(unsigned char pos, unsigned char *v)
 {
   char *c = (char *)v;
   __display_str(display+pos, c);
   return strlen(c);
+}
+
+static unsigned char show_ampm(unsigned char pos, unsigned char *v)
+{
+  if (region != REGION_US)
+    return 0;
+
+  if (*v >= 12)
+    return show_str(pos, (unsigned char *)" pm");
+  else
+    return show_str(pos, (unsigned char *)" am");
 }
 
 static void update_hour(unsigned char *v)
@@ -673,13 +699,14 @@ static struct menu_state {
 } menu_state;
 
 static const struct field alarm_fields[] PROGMEM = {
-  { show_num, update_hour, &menu_state.time.h },
+  { show_hour, update_hour, &menu_state.time.h },
   { show_str, NULL, (unsigned char *)"-" },
   { show_num, update_mod60, &menu_state.time.m },
+  { show_ampm, NULL, &menu_state.time.h },
 };
 
 static const struct field time_fields[] PROGMEM = {
-  { show_num, update_hour, &menu_state.time.h },
+  { show_hour, update_hour, &menu_state.time.h },
   { show_str, NULL, (unsigned char *)" " },
   { show_num, update_mod60, &menu_state.time.m },
   { show_str, NULL, (unsigned char *)" " },
