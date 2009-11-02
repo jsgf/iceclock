@@ -63,12 +63,13 @@ static volatile uint8_t suspend_update; /* if set, don't update */
 // how loud is the speaker supposed to be?
 uint8_t volume;
 
-// display brightness
-static uint8_t brightness;
-
 // whether the alarm is on, going off, and alarm time
 static uint8_t alarm_on, alarming;
 struct time alarm;
+
+/* hour morning and evening start */
+static uint8_t morning, evening;
+static uint8_t daybrite, nightbrite;
 
 // are we in low power sleep mode?
 volatile uint8_t sleepmode = 0;
@@ -472,14 +473,29 @@ static void increment_time(struct timedate *td)
 
 static void load_brite(void)
 {
-  brightness = eeprom_read_byte((unsigned char *)EE_BRIGHT);
-  if (brightness < BRITE_MIN || brightness > BRITE_MAX)
-    brightness = BRITE_MIN;
+  morning = eeprom_read_byte((unsigned char *)EE_MORNINGHR);
+  if (morning < 0 || morning > 12)
+    morning = 6;
+
+  evening = eeprom_read_byte((unsigned char *)EE_EVENINGHR);
+  if (evening < 12 || evening > 23)
+    evening = 18;
+
+  daybrite = eeprom_read_byte((unsigned char *)EE_DAYBRITE);
+  if (daybrite < BRITE_MIN || daybrite > BRITE_MAX)
+    daybrite = BRITE_MAX;
+
+  nightbrite = eeprom_read_byte((unsigned char *)EE_NIGHTBRITE);
+  if (nightbrite < BRITE_MIN || nightbrite > BRITE_MAX)
+    nightbrite = BRITE_MIN;
 }
 
 static void save_brite(void)
 {
-  eeprom_write_byte((unsigned char *)EE_BRIGHT, brightness);
+  eeprom_write_byte((unsigned char *)EE_MORNINGHR, morning);
+  eeprom_write_byte((unsigned char *)EE_EVENINGHR, evening);
+  eeprom_write_byte((unsigned char *)EE_DAYBRITE, daybrite);
+  eeprom_write_byte((unsigned char *)EE_NIGHTBRITE, nightbrite);
 }
 
 static void set_brite(void)
@@ -488,8 +504,13 @@ static void set_brite(void)
 
   if (alarming)
     b = (timedate.time.s % 2) ? BRITE_MIN : BRITE_MAX;
-  else
-    b = brightness;
+  else {
+    uint8_t hour = timedate.time.h;
+
+    b = nightbrite;
+    if (hour >= morning && hour < evening)
+      b = daybrite;
+  }
 
   /* safety */
   if (b < BRITE_MIN || b > BRITE_MAX)
@@ -525,9 +546,8 @@ SIGNAL (TIMER2_OVF_vect) {
     snoozetimer = 0;
   }
 
-  /* blink display from interrupt */
-  if (alarming)
-    set_brite();
+  /* set brightness according to alarm state and time */
+  set_brite();
 
   if (snoozetimer)
     snoozetimer--;
@@ -918,10 +938,32 @@ static const struct field monthdate_fields[] PROGMEM = {
   { show_num_slz, NULL, &timedate.date.d },
 };
 
-static unsigned char brite_P[] PROGMEM = "brite ";
-static const struct field brite_fields[] PROGMEM = {
-  { show_str, NULL, brite_P },
-  { show_num, update_brite, &brightness },
+static void update_morning(unsigned char *v)
+{
+  if (++*v >= 12)
+    *v = 0;
+}
+
+unsigned char day_P[] PROGMEM = "dy ";
+static const struct field day_fields[] PROGMEM = {
+  { show_str, NULL, day_P },
+  { show_hour, update_morning, &morning },
+  SPACE,
+  { show_num, update_brite, &daybrite },
+};
+
+static void update_evening(unsigned char *v)
+{
+  if (++*v >= 24)
+    *v = 12;
+}
+
+static unsigned char night_P[] PROGMEM = "nt ";
+static const struct field night_fields[] PROGMEM = {
+  { show_str, NULL, night_P },
+  { show_hour, update_evening, &evening },
+  SPACE,
+  { show_num, update_brite, &nightbrite },
 };
 
 static unsigned char vol_P[] PROGMEM = "vol ";
@@ -973,6 +1015,8 @@ static void store_time(void)
   eeprom_write_byte((uint8_t *)EE_MIN, timedate.time.m);
 
   suspend_update = 0;
+
+  set_brite();
 }
 
 static void get_date(void)
@@ -991,14 +1035,20 @@ static void store_date(void)
   eeprom_write_byte((uint8_t *)EE_YEAR, timedate.date.y);    
 }
 
-static void get_brite(void)
+static void get_day(void)
 {
-  copy_fields(brite_fields, NELEM(brite_fields));
+  copy_fields(day_fields, NELEM(day_fields));
+}
+
+static void get_night(void)
+{
+  copy_fields(night_fields, NELEM(night_fields));
 }
 
 static void store_brite(void)
 {
   save_brite();
+  set_brite();
 }
 
 static void get_vol(void)
@@ -1035,7 +1085,8 @@ static const struct entry mainmenu[] = {
   { "set alarm", get_alarm, store_alarm },
   { "set time", get_time, store_time },
   { "set date", get_date, store_date },
-  { "set brit", get_brite, store_brite },
+  { "day brite", get_day, store_brite },
+  { "nite brit", get_night, store_brite },
   { "set vol", get_vol, store_vol },
   { "set regn", get_region, store_region },
   { "set secs", get_secmode, store_secmode },
