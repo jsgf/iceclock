@@ -777,9 +777,9 @@ static void update_brite(unsigned char *v)
 static unsigned char show_vol(unsigned char pos, unsigned char *v)
 {
   if (*v)
-    return __display_str(display+pos, "high");
+    return show_str(pos, (unsigned char *)PSTR("high"));
   else
-    return __display_str(display+pos, " low");
+    return show_str(pos, (unsigned char *)PSTR("low"));
 }
 
 static void update_toggle(unsigned char *v)
