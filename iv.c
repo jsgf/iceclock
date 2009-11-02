@@ -1129,7 +1129,7 @@ static uint8_t skip_to_next_input(const struct field *field, unsigned char nfiel
 static void show_entry(const struct entry *entry)
 {
   const struct field *field;
-  uint8_t input, nfields, changed;
+  uint8_t input, nfields;
 
   entry->get();
 
@@ -1137,60 +1137,63 @@ static void show_entry(const struct entry *entry)
   input = skip_to_next_input(menu_state.fields, nfields, 0);
   field = &menu_state.fields[input];
 
-  changed = 1;
   while (input < nfields) {
-    kickthedog();
+    display_entry(input);
 
-    if (changed) {
-      display_entry(input);
-      changed = 0;
-    }
+    for (;;) {
+      kickthedog();
 
-    if (button_timeout() || button_sample(BUT_MENU))
-      break;
+      if (button_timeout() || button_sample(BUT_MENU))
+	goto out;
 
-    if (button_sample(BUT_NEXT)) {
-      field->update(field->val);
-      changed = 1;
-    }
+      if (button_sample(BUT_NEXT)) {
+	field->update(field->val);
+	break;
+      }
 
-    if (button_sample(BUT_SET)) {
-      input = skip_to_next_input(menu_state.fields, nfields, input+1);
-      field = &menu_state.fields[input];
-      changed = 1;
+      if (button_sample(BUT_SET)) {
+	input = skip_to_next_input(menu_state.fields, nfields, input+1);
+	field = &menu_state.fields[input];
+	break;
+      }
+
+      sleep();
     }
   }
 
+out:
   entry->store();
 }
 
 static void show_menu(const struct entry *menu, int nentries)
 {
   uint8_t entry = 0;
-  uint8_t changed = 1;
 
   while(entry < nentries) {
-    kickthedog();
+    display_str(menu->prompt);
 
-    if (changed) {
-      display_str(menu->prompt);
-      changed = 0;
-    }
+    for (;;) {
+      kickthedog();
 
-    if (button_timeout())
-      break;
+      if (button_timeout())
+	goto out;
 
-    if (button_sample(BUT_MENU)) {
-      entry++;
-      menu++;
-      changed = 1;
-    }
+      if (button_sample(BUT_MENU)) {
+	entry++;
+	menu++;
+	break;
+      }
 
-    if (button_sample(BUT_SET)) {
-      show_entry(menu);
-      break;
+      if (button_sample(BUT_SET)) {
+	show_entry(menu);
+	goto out;
+      }
+
+      sleep();
     }
   }
+out:
+  return;
 }
 
 // This displays a time on the clock
