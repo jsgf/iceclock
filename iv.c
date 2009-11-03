@@ -968,13 +968,13 @@ static const struct field timeset_fields[] PROGMEM = {
 static const struct field us_date_fields[] PROGMEM = {
   { show_num, update_month, &timedate.date.m },
   DASH,
-  { show_num, update_day, &timedate.date.d },
+  { show_num_slz, update_day, &timedate.date.d },
   DASH,
   { show_num, update_year, &timedate.date.y },
 };
 
 static const struct field euro_date_fields[] PROGMEM = {
-  { show_num, update_day, &timedate.date.d },
+  { show_num_slz, update_day, &timedate.date.d },
   DASH,
   { show_num, update_month, &timedate.date.m },
   DASH,
