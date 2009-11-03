@@ -63,9 +63,22 @@ static volatile uint8_t suspend_update; /* if set, don't update */
 // how loud is the speaker supposed to be?
 uint8_t volume;
 
+#define DAY_SUN		(1 << 0)
+#define DAY_MON		(1 << 1)
+#define DAY_TUE		(1 << 2)
+#define DAY_WED		(1 << 3)
+#define DAY_THUR	(1 << 4)
+#define DAY_FRI		(1 << 5)
+#define DAY_SAT		(1 << 6)
+
+#define DAYS_WEEKEND	(DAY_SAT | DAY_SUN)
+#define DAYS_WEEK	(DAY_MON | DAY_TUE | DAY_WED | DAY_THUR | DAY_FRI)
+#define DAYS_ALL	(DAYS_WEEKEND | DAYS_WEEK)
+
 // whether the alarm is on, going off, and alarm time
 static uint8_t alarm_on, alarming;
-struct time alarm;
+static struct time alarm;
+static uint8_t alarm_days = DAYS_ALL;
 
 /* hour morning and evening start */
 static uint8_t morning, evening;
@@ -433,6 +446,25 @@ static uint8_t leapyear(uint16_t y) {
   return ( (!(y % 4) && (y % 100)) || !(y % 400));
 }
 
+static uint8_t dotw(const struct date *date)
+{
+  uint16_t month, year;
+
+  month = date->m;
+  year = 2000 + date->y;
+  if (month < 3)  {
+    month += 12;
+    year -= 1;
+  }
+
+  return (date->d +
+	  (2 * month) +
+	  (6 * (month+1)/10) +
+	  year + (year/4) -
+	  (year/100) +
+	  (year/400) + 1) % 7;
+}
+
 static void increment_time(struct timedate *td)
 {
   td->time.s++;             // one second has gone by
@@ -547,7 +579,9 @@ SIGNAL (TIMER2_OVF_vect) {
   if (sleepmode)
     return;
    
-  if (alarm_on && (alarm.h == td.time.h) && (alarm.m == td.time.m) && (td.time.s == 0)) {
+  if (alarm_on && (alarm_days & (1 << dotw(&td.date))) &&
+      (alarm.h == td.time.h) &&
+      (alarm.m == td.time.m) && (td.time.s == 0)) {
     DEBUGP("alarm on!");
     alarming = 1;
     snoozetimer = 0;
@@ -710,10 +744,32 @@ static unsigned char show_second(unsigned char pos, unsigned char *v)
   }
 }
 
+static unsigned char show_days(unsigned char pos, unsigned char *v)
+{
+  static const char *str;
+
+  switch (*v) {
+  default:
+  case DAYS_ALL:	str = PSTR("all "); break;
+  case DAYS_WEEKEND:	str = PSTR("wknd"); break;
+  case DAYS_WEEK:	str = PSTR("week"); break;
+  }
+
+  return show_str(pos, (unsigned char *)str);
+}
+
+static void update_days(unsigned char *v)
+{
+  switch (*v) {
+  default:
+  case DAYS_WEEKEND:	*v = DAYS_ALL; break;
+  case DAYS_WEEK:	*v = DAYS_WEEKEND; break;
+  case DAYS_ALL:	*v = DAYS_WEEK; break;
+  }
+}
+
 static const char *dayofweek(const struct date *date)
 {
-  uint16_t month, year;
-  uint8_t dotw;
 #define DOW(dow)	static const char dow[] PROGMEM = #dow
   DOW(sunday);
   DOW(monday);
@@ -727,21 +783,7 @@ static const char *dayofweek(const struct date *date)
     sunday, monday, tuesday, wednsday, thursday, friday, saturday
   };
 
-  month = date->m;
-  year = 2000 + date->y;
-  if (month < 3)  {
-    month += 12;
-    year -= 1;
-  }
-
-  dotw = (date->d +
-	  (2 * month) +
-	  (6 * (month+1)/10) +
-	  year + (year/4) -
-	  (year/100) +
-	  (year/400) + 1) % 7;
-
-  return days[dotw];
+  return days[dotw(date)];
 }
 
 static unsigned char show_dayofweek(unsigned char pos, unsigned char *v)
@@ -900,6 +942,12 @@ static const struct field alarm_fields[] PROGMEM = {
   { show_ampm, NULL, &alarm.h },
 };
 
+unsigned char days_P[] PROGMEM = "days";
+static const struct field alarmdays_fields[] PROGMEM = {
+  { show_days, update_days, &alarm_days },
+  { show_str, NULL, days_P },
+};
+
 static const struct field time_fields[] PROGMEM = {
   { show_hour, update_hour, &timedate.time.h },
   SPACE,
@@ -1008,6 +1056,12 @@ static void store_alarm(void)
 {
   eeprom_write_byte((uint8_t *)EE_ALARM_HOUR, alarm.h);
   eeprom_write_byte((uint8_t *)EE_ALARM_MIN, alarm.m);
+  eeprom_write_byte((uint8_t *)EE_ALARM_DAYS, alarm_days);
+}
+
+static void get_alarmdays(void)
+{
+  copy_fields(alarmdays_fields, NELEM(alarmdays_fields));
 }
 
 static void get_time(void)
@@ -1103,6 +1157,7 @@ static void store_snooze(void)
 
 static const struct entry mainmenu[] PROGMEM = {
   { "set alarm", get_alarm, store_alarm },
+  { "alrm day", get_alarmdays, store_alarm },
   { "set snoz", get_snooze, store_snooze },
   { "set time", get_time, store_time },
   { "set date", get_date, store_date },
@@ -1276,6 +1331,7 @@ static void clock_init(void) {
   // Set up the stored alarm time and date
   alarm.m = eeprom_read_byte((uint8_t *)EE_ALARM_MIN) % 60;
   alarm.h = eeprom_read_byte((uint8_t *)EE_ALARM_HOUR) % 24;
+  alarm_days = eeprom_read_byte((uint8_t *)EE_ALARM_DAYS);
 
   timedate.date.y = eeprom_read_byte((uint8_t *)EE_YEAR) % 100;
   timedate.date.m = eeprom_read_byte((uint8_t *)EE_MONTH) % 13;
@@ -1545,6 +1601,12 @@ int main(void) {
   }
 }
 
+static void display_alarm_days(void)
+{
+  get_alarmdays();
+  display_entry(-1);
+}
+
 // This turns on/off the alarm when the switch has been
 // set. It also displays the alarm time
 void setalarmstate(void) {
@@ -1564,6 +1626,9 @@ void setalarmstate(void) {
       // show the current alarm time set
       kickthedog();
       display_alarm();
+      delayms(1000);
+      kickthedog();
+      display_alarm_days();
       delayms(1000);
       // after a second, go back to clock mode
   } else {

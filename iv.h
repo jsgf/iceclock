@@ -62,7 +62,7 @@ THE SOFTWARE.
 #define EE_SEC 6
 #define EE_ALARM_HOUR 7 
 #define EE_ALARM_MIN 8
-//#define EE_BRIGHT 9
+#define EE_ALARM_DAYS 9
 #define EE_VOLUME 10
 #define EE_REGION 11
 #define EE_SNOOZE 12
