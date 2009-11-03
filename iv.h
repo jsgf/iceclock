@@ -54,6 +54,18 @@ THE SOFTWARE.
 #define SEC_AMPM 2
 #define SEC_NONE 3
 
+#define DAY_SUN		(1 << 0)
+#define DAY_MON		(1 << 1)
+#define DAY_TUE		(1 << 2)
+#define DAY_WED		(1 << 3)
+#define DAY_THUR	(1 << 4)
+#define DAY_FRI		(1 << 5)
+#define DAY_SAT		(1 << 6)
+
+#define DAYS_WEEKEND	(DAY_SAT | DAY_SUN)
+#define DAYS_WEEK	(DAY_MON | DAY_TUE | DAY_WED | DAY_THUR | DAY_FRI)
+#define DAYS_ALL	(DAYS_WEEKEND | DAYS_WEEK)
+
 #define EE_YEAR 1
 #define EE_MONTH 2
 #define EE_DAY 3

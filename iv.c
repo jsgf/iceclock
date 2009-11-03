@@ -63,18 +63,6 @@ static volatile uint8_t suspend_update; /* if set, don't update */
 // how loud is the speaker supposed to be?
 uint8_t volume;
 
-#define DAY_SUN		(1 << 0)
-#define DAY_MON		(1 << 1)
-#define DAY_TUE		(1 << 2)
-#define DAY_WED		(1 << 3)
-#define DAY_THUR	(1 << 4)
-#define DAY_FRI		(1 << 5)
-#define DAY_SAT		(1 << 6)
-
-#define DAYS_WEEKEND	(DAY_SAT | DAY_SUN)
-#define DAYS_WEEK	(DAY_MON | DAY_TUE | DAY_WED | DAY_THUR | DAY_FRI)
-#define DAYS_ALL	(DAYS_WEEKEND | DAYS_WEEK)
-
 // whether the alarm is on, going off, and alarm time
 static uint8_t alarm_on, alarming;
 static struct time alarm;
