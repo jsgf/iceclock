@@ -329,7 +329,10 @@ static uint8_t button_poll(uint8_t button)
  */
 static uint8_t button_sample(uint8_t button)
 {
-  uint8_t ret = button_poll(button);
+  uint8_t ret;
+
+  cli();
+  ret = button_poll(button);
 
   if (ret) {
     /* latched -> sampled */
@@ -337,8 +340,12 @@ static uint8_t button_sample(uint8_t button)
     barrier();
 
     button_lastpress = now();
+
+    sei();
+
     tick();
-  }
+  } else
+    sei();
 
   return ret;
 }
