@@ -834,6 +834,12 @@ static void update_mod60(unsigned char *v)
     *v = 0;
 }
 
+static void update_mod60_s5(unsigned char *v)
+{
+  if ((*v += 5) >= 60)
+    *v = 0;
+}
+
 static void update_day(unsigned char *v)
 {
   if (++*v > 31)
@@ -1037,7 +1043,7 @@ static const struct field secmode_fields[] PROGMEM = {
 static unsigned char snoz_P[] PROGMEM = "snoz ";
 static const struct field snooze_fields[] PROGMEM = {
   { show_str, NULL, snoz_P },
-  { show_num_slz, update_mod60, &snooze },
+  { show_num_slz, update_mod60_s5, &snooze },
 };
 
 #define NELEM(a)	(sizeof(a) / sizeof(*a))
