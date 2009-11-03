@@ -1428,6 +1428,7 @@ static void ui(void)
     if (button_sample(BUT_SET) || button_sample(BUT_NEXT)) {
       display_date(DAY);
 
+      kickthedog();
       delayms(1500);
     } 
   }
@@ -1561,6 +1562,7 @@ void setalarmstate(void) {
       // its not actually SHOW_SNOOZE but just anything but SHOW_TIME
       delayms(1000);
       // show the current alarm time set
+      kickthedog();
       display_alarm();
       delayms(1000);
       // after a second, go back to clock mode
