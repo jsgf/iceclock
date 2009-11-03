@@ -596,10 +596,17 @@ SIGNAL (TIMER2_OVF_vect) {
 
 //Alarm Switch
 SIGNAL(SIG_INTERRUPT0) {  
+  uint8_t state;
+
   EIMSK = 0;  //Disable this interrupt while we are processing it.
   uart_putchar('i');
 
-  button_change_intr(BUT_ALARM, !(ALARM_PIN & _BV(ALARM)));
+  state = !(ALARM_PIN & _BV(ALARM));
+  button_change_intr(BUT_ALARM, state);
+
+  /* Turn off alarm immediately */
+  if (!state)
+    setalarmstate();
 
   EIMSK = _BV(INT0);  //And reenable it before exiting.
 }
