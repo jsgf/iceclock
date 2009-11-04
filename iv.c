@@ -147,16 +147,6 @@ void delayms(uint16_t ms) {
     sleep();
 }
 
-// When the alarm is going off, pressing a button turns on snooze mode
-// this sets the snoozetimer off in snooze seconds - which turns on
-// the alarm again
-void setsnooze(void) {
-  snoozetimer = snooze * 60; // convert minutes to seconds
-  DEBUGP("snooze");
-  display_str("snoozing");
-  delayms(1000);
-}
-
 // we reset the watchdog timer 
 static void kickthedog(void) {
   wdt_reset();
@@ -405,9 +395,40 @@ static void setdisplay(uint8_t digit, uint8_t segments) {
   vfd_send(d);
 }
 
-static void flip_display(void)
+static uint8_t scroll_left(uint8_t *statep)
+{
+  uint8_t s = *statep;
+
+  if (s >= DISPLAYSIZE)
+    return 0;
+
+  memmove(output_display, output_display+1, DISPLAYSIZE-1);
+  output_display[DISPLAYSIZE-1] = display[s];
+
+  *statep = ++s;
+
+  return 1000/20;		/* 20fps */
+}
+
+static uint8_t flip(uint8_t *unused)
 {
   memcpy(output_display, display, sizeof(output_display));
+  return 0;
+}
+
+static void flip_display(transition_t* trans)
+{
+  uint8_t state = 0;
+  uint8_t delay;
+
+  /* Disable interrupts while generating new output to prevent flickers */
+  cli();
+  while((delay = (*trans)(&state))) {
+    sei();
+    delayms(delay);
+    cli();
+  }
+  sei();
 }
 
 // called @ (F_CPU/256) = ~30khz (31.25 khz)
@@ -1100,7 +1121,6 @@ static const struct field snooze_fields[] PROGMEM = {
   { show_num_slz, update_mod60_s5, &snooze },
 };
 
-#define NELEM(a)	(sizeof(a) / sizeof(*a))
 static void copy_fields(const struct field PROGMEM *fields, unsigned int nelem)
 {
   memcpy_P(menu_state.fields, fields, nelem * sizeof(struct field));
@@ -1228,7 +1248,7 @@ static const struct entry mainmenu[] PROGMEM = {
   { "set secs", get_secmode, store_secmode },
 };
 
-static void display_entry(char highlight)
+static void display_entry(char highlight, transition_t *trans)
 {
   uint8_t pos, i;
   const struct field *field = menu_state.fields;
@@ -1252,7 +1272,7 @@ static void display_entry(char highlight)
   for (i = pos; i < DISPLAYSIZE; i++)
     display[i] = 0;
 
-  flip_display();
+  flip_display(trans);
 }
 
 /* Skip to next valid input field; left unchanged if already valid. */
@@ -1265,7 +1285,7 @@ static uint8_t skip_to_next_input(const struct field *field, unsigned char nfiel
   return next;
 }
 
-static void show_entry(const struct entry *entry)
+static void show_entry(const struct entry *entry, transition_t *trans)
 {
   const struct field *field;
   uint8_t input, nfields;
@@ -1281,7 +1301,10 @@ static void show_entry(const struct entry *entry)
       break;
     field = &menu_state.fields[input];
 
-    display_entry(input);
+    display_entry(input, trans);
+
+    /* no matter how we were introduced, just flip when updating display */
+    trans = flip;
 
     for (;;) {
       kickthedog();
@@ -1315,7 +1338,7 @@ static void show_menu(const struct entry *menu, int nentries)
     struct entry m;
 
     memcpy_P(&m, menu, sizeof(m));
-    display_str(m.prompt);
+    display_str_trans(m.prompt, scroll_left);
 
     for (;;) {
       kickthedog();
@@ -1330,7 +1353,7 @@ static void show_menu(const struct entry *menu, int nentries)
       }
 
       if (button_sample(BUT_SET)) {
-	show_entry(&m);
+	show_entry(&m, scroll_left);
 	goto out;
       }
 
@@ -1345,31 +1368,31 @@ out:
 static void display_time(void)
 {
   copy_fields(time_fields, NELEM(time_fields));
-  display_entry(-1);
+  display_entry(-1, flip);
 }
 
 // Kinda like display_time but just hours and minutes
-void display_alarm(void)
+void display_alarm(transition_t *trans)
 {
   get_alarm();
-  display_entry(-1);
+  display_entry(-1, trans);
 }
 
 // We can display the current date!
-static void display_date(uint8_t style)
+static void display_date(uint8_t style, transition_t *trans)
 {
   switch (style) {
   case DATE:
     get_date();
-    display_entry(-1);
+    display_entry(-1, trans);
     break;
 
   case DAY:
     copy_fields(dotw_fields, NELEM(dotw_fields));
-    display_entry(-1);
+    display_entry(-1, trans);
     delayms(1000);
     copy_fields(monthdate_fields, NELEM(monthdate_fields));
-    display_entry(-1);
+    display_entry(-1, trans);
     break;
   }
 }
@@ -1517,6 +1540,16 @@ void initbuttons(void) {
   button_change_intr(BUT_ALARM, !(ALARM_PIN & _BV(ALARM)));
 }
 
+// When the alarm is going off, pressing a button turns on snooze mode
+// this sets the snoozetimer off in snooze seconds - which turns on
+// the alarm again
+static void setsnooze(void) {
+  snoozetimer = snooze * 60; // convert minutes to seconds
+  DEBUGP("snooze");
+  display_str_trans("snoozing", scroll_left);
+  delayms(1000);
+}
+
 static void ui(void)
 {
   /* recheck alarm switch */
@@ -1544,7 +1577,7 @@ static void ui(void)
       show_menu(mainmenu, NELEM(mainmenu));
     
     if (button_sample(BUT_SET) || button_sample(BUT_NEXT)) {
-      display_date(DAY);
+      display_date(DAY, scroll_left);
 
       kickthedog();
       delayms(1500);
@@ -1663,10 +1696,10 @@ int main(void) {
   }
 }
 
-static void display_alarm_days(void)
+static void display_alarm_days(transition_t *trans)
 {
   get_alarmdays();
-  display_entry(-1);
+  display_entry(-1, trans);
 }
 
 // This turns on/off the alarm when the switch has been
@@ -1682,15 +1715,15 @@ void setalarmstate(void) {
 
   if (want) {
       // show the status on the VFD tube
-      display_str("alarm on");
+      display_str_trans("alarm on", scroll_left);
       // its not actually SHOW_SNOOZE but just anything but SHOW_TIME
       delayms(1000);
       // show the current alarm time set
       kickthedog();
-      display_alarm();
+      display_alarm(scroll_left);
       delayms(1000);
       kickthedog();
-      display_alarm_days();
+      display_alarm_days(scroll_left);
       delayms(1000);
       // after a second, go back to clock mode
   } else {
@@ -1815,7 +1848,7 @@ static unsigned char __display_str(uint8_t *disp, const char *s)
   return len;
 }
 
-void display_str(const char *s)
+void display_str_trans(const char *s, transition_t *trans)
 {
   uint8_t i, len;
 
@@ -1826,6 +1859,10 @@ void display_str(const char *s)
   for (i = len+1; i < DISPLAYSIZE; i++)
     display[i] = 0;
 
-  flip_display();
+  flip_display(trans);
 }
 
+void display_str(const char *s)
+{
+  display_str_trans(s, flip);
+}

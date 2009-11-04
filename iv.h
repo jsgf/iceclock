@@ -92,7 +92,9 @@ void initbuttons(void);
 void boost_init(void);
 void speaker_init(void);
 
+typedef uint8_t (transition_t)(uint8_t *);
 void display_str(const char *s);
+void display_str_trans(const char *s, transition_t *trans);
 
 void set_time(void);
 void set_alarm(void);
@@ -100,7 +102,6 @@ void set_date(void);
 void set_brightness(void);
 void set_volume(void);
 void set_region(void);
-void set_snooze(void); // not activated by default
 
 void beep(uint16_t freq, uint8_t times);
 void tick(void);
@@ -161,3 +162,4 @@ void setalarmstate(void);
 #define DIG_9 3
 
 
+#define NELEM(a)	(sizeof(a) / sizeof(*a))
