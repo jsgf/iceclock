@@ -90,7 +90,6 @@ void (*app_start)(void) = 0x0000;
 
 void initbuttons(void);
 void boost_init(void);
-void vfd_init(void);
 void speaker_init(void);
 
 void display_str(const char *s);
@@ -107,11 +106,6 @@ void beep(uint16_t freq, uint8_t times);
 void tick(void);
 
 void setalarmstate(void);
-
-void setdisplay(uint8_t digit, uint8_t segments);
-void vfd_send(uint32_t d);
-void spi_xfer(uint8_t c);
-
 
 #define BOOST PD6
 #define BOOST_DDR DDRD

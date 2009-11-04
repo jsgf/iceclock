@@ -80,20 +80,20 @@ static uint8_t restored = 0;
 
 // Our display buffer, which is updated to show the time/date/etc
 // and is multiplexed onto the tube
-uint8_t display[DISPLAYSIZE]; // stores segments, not values!
-uint8_t currdigit = 0;        // which digit we are currently multiplexing
+static uint8_t display[DISPLAYSIZE]; // stores segments, not values!
+static uint8_t currdigit = 0;        // which digit we are currently multiplexing
 
 // This table allow us to index between what digit we want to light up
 // and what the pin number is on the MAX6921 see the .h for values.
 // Stored in ROM (PROGMEM) to save RAM
-const uint8_t digittable[] PROGMEM = {
+static const uint8_t digittable[] PROGMEM = {
   DIG_9, DIG_8, DIG_7, DIG_6, DIG_5, DIG_4, DIG_3, DIG_2, DIG_1
 };
 
 // This table allow us to index between what segment we want to light up
 // and what the pin number is on the MAX6921 see the .h for values.
 // Stored in ROM (PROGMEM) to save RAM
-const uint8_t segmenttable[] PROGMEM = {
+static const uint8_t segmenttable[] PROGMEM = {
   SEG_H, SEG_G,  SEG_F,  SEG_E,  SEG_D,  SEG_C,  SEG_B,  SEG_A 
 };
 
@@ -101,7 +101,7 @@ const uint8_t segmenttable[] PROGMEM = {
 // down so that we can refresh at about 100Hz (31.25KHz / 300)
 // We refresh the entire display at 100Hz so each digit is updated
 // 100Hz/DISPLAYSIZE
-uint16_t muxdiv = 0;
+static uint16_t muxdiv = 0;
 #define MUX_DIVIDER (300 / DISPLAYSIZE)
 
 // Likewise divides 100Hz down to 1Hz for the alarm beeping
@@ -349,6 +349,59 @@ static uint8_t button_sample(uint8_t button)
     sei();
 
   return ret;
+}
+
+/************************* LOW LEVEL DISPLAY ************************/
+
+// Setup SPI
+static void vfd_init(void) {
+  SPCR  = _BV(SPE) | _BV(MSTR) | _BV(SPR0);
+}
+
+// Send 1 byte via SPI
+static void spi_xfer(uint8_t c) {
+
+  SPDR = c;
+  while (! (SPSR & _BV(SPIF)));
+}
+
+// send raw data to display, its pretty straightforward. Just send 32 bits via SPI
+// the bottom 20 define the segments
+static void vfd_send(uint32_t d) {
+  // send lowest 20 bits
+  cli();       // to prevent flicker we turn off interrupts
+  spi_xfer(d >> 16);
+  spi_xfer(d >> 8);
+  spi_xfer(d);
+
+  // latch data
+  VFDLOAD_PORT |= _BV(VFDLOAD);
+  VFDLOAD_PORT &= ~_BV(VFDLOAD);
+  sei();
+}
+
+// This changes and updates the display
+// We use the digit/segment table to determine which
+// pins on the MAX6921 to turn on
+static void setdisplay(uint8_t digit, uint8_t segments) {
+  uint32_t d = 0;  // we only need 20 bits but 32 will do
+  uint8_t i;
+
+  // Set the digit selection pin
+  d |= _BV(pgm_read_byte(digittable + digit));
+
+  
+  // Set the individual segments for this digit
+  for (i=0; i<8; i++) {
+    if (segments & _BV(i)) {
+      uint32_t t = 1;
+      t <<= pgm_read_byte(segmenttable + i);
+      d |= t;
+    }
+  }
+
+  // Shift the data out to the display
+  vfd_send(d);
 }
 
 // called @ (F_CPU/256) = ~30khz (31.25 khz)
@@ -1766,55 +1819,3 @@ void display_str(const char *s)
     display[i] = 0;
 }
 
-/************************* LOW LEVEL DISPLAY ************************/
-
-// Setup SPI
-void vfd_init(void) {
-  SPCR  = _BV(SPE) | _BV(MSTR) | _BV(SPR0);
-}
-
-// This changes and updates the display
-// We use the digit/segment table to determine which
-// pins on the MAX6921 to turn on
-void setdisplay(uint8_t digit, uint8_t segments) {
-  uint32_t d = 0;  // we only need 20 bits but 32 will do
-  uint8_t i;
-
-  // Set the digit selection pin
-  d |= _BV(pgm_read_byte(digittable + digit));
-
-  
-  // Set the individual segments for this digit
-  for (i=0; i<8; i++) {
-    if (segments & _BV(i)) {
-      uint32_t t = 1;
-      t <<= pgm_read_byte(segmenttable + i);
-      d |= t;
-    }
-  }
-
-  // Shift the data out to the display
-  vfd_send(d);
-}
-
-// send raw data to display, its pretty straightforward. Just send 32 bits via SPI
-// the bottom 20 define the segments
-void vfd_send(uint32_t d) {
-  // send lowest 20 bits
-  cli();       // to prevent flicker we turn off interrupts
-  spi_xfer(d >> 16);
-  spi_xfer(d >> 8);
-  spi_xfer(d);
-
-  // latch data
-  VFDLOAD_PORT |= _BV(VFDLOAD);
-  VFDLOAD_PORT &= ~_BV(VFDLOAD);
-  sei();
-}
-
-// Send 1 byte via SPI
-void spi_xfer(uint8_t c) {
-
-  SPDR = c;
-  while (! (SPSR & _BV(SPIF)));
-}
