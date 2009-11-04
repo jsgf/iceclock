@@ -605,7 +605,7 @@ static void save_brite(void)
   eeprom_write_byte((unsigned char *)EE_NIGHTBRITE, nightbrite);
 }
 
-static void set_brite(void)
+static uint8_t get_brite(void)
 {
   uint8_t b;
 
@@ -623,7 +623,12 @@ static void set_brite(void)
   if (b < BRITE_MIN || b > BRITE_MAX)
     b = BRITE_MIN;
 
-  OCR0A = b;
+  return b;
+}
+
+static void set_brite(void)
+{
+  OCR0A = get_brite();
 }
 
 /*
