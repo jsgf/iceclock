@@ -81,6 +81,7 @@ static uint8_t restored = 0;
 // Our display buffer, which is updated to show the time/date/etc
 // and is multiplexed onto the tube
 static uint8_t display[DISPLAYSIZE]; // stores segments, not values!
+static uint8_t output_display[DISPLAYSIZE]; // stores segments, not values!
 static uint8_t currdigit = 0;        // which digit we are currently multiplexing
 
 // This table allow us to index between what digit we want to light up
@@ -404,6 +405,11 @@ static void setdisplay(uint8_t digit, uint8_t segments) {
   vfd_send(d);
 }
 
+static void flip_display(void)
+{
+  memcpy(output_display, display, sizeof(output_display));
+}
+
 // called @ (F_CPU/256) = ~30khz (31.25 khz)
 SIGNAL (SIG_OVERFLOW0) {
   // allow other interrupts to go off while we're doing display updates
@@ -427,7 +433,7 @@ SIGNAL (SIG_OVERFLOW0) {
     currdigit = 0;
 
   // Set the current display's segments
-  setdisplay(currdigit, display[currdigit]);
+  setdisplay(currdigit, output_display[currdigit]);
   // and go to the next
   currdigit++;
 
@@ -1245,6 +1251,8 @@ static void display_entry(char highlight)
 
   for (i = pos; i < DISPLAYSIZE; i++)
     display[i] = 0;
+
+  flip_display();
 }
 
 /* Skip to next valid input field; left unchanged if already valid. */
@@ -1517,12 +1525,12 @@ static void ui(void)
   if (timeunknown && (timedate.time.s % 2))
     display_str("        ");
   else {
-    display_time();
-
     if (alarm_on)
       display[0] |= 0x2;
     else 
       display[0] &= ~0x2;
+
+    display_time();
   }
 
   if (alarming && !snoozetimer) {
@@ -1817,5 +1825,7 @@ void display_str(const char *s)
   len = __display_str(display+1, s);
   for (i = len+1; i < DISPLAYSIZE; i++)
     display[i] = 0;
+
+  flip_display();
 }
 
