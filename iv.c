@@ -36,6 +36,9 @@ THE SOFTWARE.
 
 uint8_t region = REGION_US;
 
+// display seconds?
+uint8_t seconds = SECONDS_YES;
+
 // These variables store the current time.
 volatile uint8_t time_s, time_m, time_h;
 // ... and current date
@@ -94,6 +97,8 @@ uint16_t snoozetimer = 0;
 // We have a non-blocking delay function, milliseconds is updated by
 // an interrupt
 volatile uint16_t milliseconds = 0;
+volatile uint8_t centiseconds = 0;
+volatile uint8_t millicounter = 0;
 void delayms(uint16_t ms) {
   sei();
 
@@ -105,9 +110,9 @@ void delayms(uint16_t ms) {
 // this sets the snoozetimer off in MAXSNOOZE seconds - which turns on
 // the alarm again
 void setsnooze(void) {
-  //snoozetimer = eeprom_read_byte((uint8_t *)EE_SNOOZE);
-  //snoozetimer *= 60; // convert minutes to seconds
-  snoozetimer = MAXSNOOZE;
+  snoozetimer = eeprom_read_byte((uint8_t *)EE_SNOOZE);
+  snoozetimer *= 60; // convert minutes to seconds
+//  snoozetimer = MAXSNOOZE;
   DEBUGP("snooze");
   display_str("snoozing");
   displaymode = SHOW_SNOOZE;
@@ -122,6 +127,7 @@ void kickthedog(void) {
 
 // called @ (F_CPU/256) = ~30khz (31.25 khz)
 SIGNAL (SIG_OVERFLOW0) {
+	uint8_t centidigit1, centidigit2;
   // allow other interrupts to go off while we're doing display updates
   sei();
 
@@ -137,13 +143,53 @@ SIGNAL (SIG_OVERFLOW0) {
 
   // ok its not really 1ms but its like within 10% :)
   milliseconds++;
-
+  millicounter++;
+  if (millicounter == 10) {
+	centiseconds++;
+	millicounter = 0;
+  }
+//  if (!(milliseconds % 10)) centiseconds++;
+  if (centiseconds > 99) centiseconds = 0;
+//  seconds = SECONDS_FAST;
+  if ( (seconds == SECONDS_FAST) && (display[2] != 0)) {
+	  if (displaymode == SHOW_TIME) {
+		  switch (centiseconds / 10) {
+			case 0: centidigit1 = DIGIT_0; break;
+			case 1: centidigit1 = DIGIT_1; break;
+			case 2: centidigit1 = DIGIT_2; break;
+			case 3: centidigit1 = DIGIT_3; break;
+			case 4: centidigit1 = DIGIT_4; break;
+			case 5: centidigit1 = DIGIT_5; break;
+			case 6: centidigit1 = DIGIT_6; break;
+			case 7: centidigit1 = DIGIT_7; break;
+			case 8: centidigit1 = DIGIT_8; break;
+			case 9: centidigit1 = DIGIT_9; break;
+			default: centidigit1 = 0;
+		  }
+		  switch (centiseconds % 10) {
+			case 0: centidigit2 = DIGIT_0; break;
+			case 1: centidigit2 = DIGIT_1; break;
+			case 2: centidigit2 = DIGIT_2; break;
+			case 3: centidigit2 = DIGIT_3; break;
+			case 4: centidigit2 = DIGIT_4; break;
+			case 5: centidigit2 = DIGIT_5; break;
+			case 6: centidigit2 = DIGIT_6; break;
+			case 7: centidigit2 = DIGIT_7; break;
+			case 8: centidigit2 = DIGIT_8; break;
+			case 9: centidigit2 = DIGIT_9; break;
+			default: centidigit2 = 0;
+		}
+		  display[7] = centidigit1;
+	      display[8] = centidigit2;
+	  }
+  }
   // Cycle through each digit in the display
   if (currdigit >= DISPLAYSIZE)
     currdigit = 0;
 
   // Set the current display's segments
   setdisplay(currdigit, display[currdigit]);
+// if (currdigit == 7) setdisplay(7, 0xE6);
   // and go to the next
   currdigit++;
 
@@ -273,7 +319,7 @@ SIGNAL (TIMER2_OVF_vect) {
   CLKPR = 0;
 
   time_s++;             // one second has gone by
-
+  centiseconds = 0;
   // a minute!
   if (time_s >= 60) {
     time_s = 0;
@@ -578,11 +624,15 @@ int main(void) {
     sei();
 
     region = eeprom_read_byte((uint8_t *)EE_REGION);
-    
+	seconds = eeprom_read_byte((uint8_t *)EE_SECONDS);
+
     DEBUGP("speaker init");
     speaker_init();
 
-    beep(4000, 1);
+	dan_beep(2000, 50);
+	dan_beep(4000, 75);
+//    beep(2000, 1);
+//	beep(4000, 1);
 
     DEBUGP("clock init");
     clock_init();  
@@ -635,16 +685,22 @@ int main(void) {
 	display_str("set regn");
 	set_region();
 	break;
-	/*
+	
       case (SET_REGION):
 	displaymode = SET_SNOOZE;
 	display_str("set snoz");
 	set_snooze();
 	break;
-	*/
+	
+	  case (SET_SNOOZE):
+	displaymode = SET_SECONDS;
+	display_str("set scnd");
+	set_seconds();
+	break;
+	
       default:
 	displaymode = SHOW_TIME;
-      }
+  }
     } else if ((just_pressed & 0x2) || (just_pressed & 0x4)) {
       just_pressed = 0;
       displaymode = NONE;
@@ -1068,59 +1124,116 @@ void set_volume(void) {
 }
 
 
-
-
-void set_region(void) {
-  uint8_t mode = SHOW_MENU;
-
-  timeoutcounter = INACTIVITYTIMEOUT;;  
-  region = eeprom_read_byte((uint8_t *)EE_REGION);
-
-  while (1) {
-    if (just_pressed || pressed) {
-      timeoutcounter = INACTIVITYTIMEOUT;;  
-      // timeout w/no buttons pressed after 3 seconds?
-    } else if (!timeoutcounter) {
-      //timed out!
-      displaymode = SHOW_TIME;     
-      return;
-    }
-    if (just_pressed & 0x1) { // mode change
-      return;
-    }
-    if (just_pressed & 0x2) {
-      just_pressed = 0;
-      if (mode == SHOW_MENU) {
-	// start!
-	mode = SET_REG;
-	// display region
-	if (region == REGION_US) {
-	  display_str("usa-12hr");
-	} else {
-	  display_str("eur-24hr");
-	}
-      } else {	
-	displaymode = SHOW_TIME;
-	return;
-      }
-    }
-    if (just_pressed & 0x4) {
-      just_pressed = 0;
-      if (mode == SET_REG) {
-	region = !region;
-	if (region == REGION_US) {
-	  display_str("usa-12hr");
-	} else {
-	  display_str("eur-24hr");
-	}
-	eeprom_write_byte((uint8_t *)EE_REGION, region);
-      }
-    }
-  }
+void set_seconds(void) {
+	uint8_t mode = SHOW_MENU;
+	
+	timeoutcounter = INACTIVITYTIMEOUT;;
+	seconds = eeprom_read_byte((uint8_t *)EE_SECONDS);
+	
+	while(1) {
+		if (just_pressed || pressed) {
+			timeoutcounter = INACTIVITYTIMEOUT;;
+			// timeout w/no buttons pressed after 3 seconds?
+		} else if (!timeoutcounter) {
+			// timed out!
+			displaymode = SHOW_TIME;
+			return;
+		}
+		if (just_pressed & 0x1) {
+			return;
+		}
+		if (just_pressed & 0x2) {
+			just_pressed = 0;
+			if (mode == SHOW_MENU) {
+				mode = SET_SECONDS;
+				switch (seconds) {
+					case SECONDS_YES:
+						display_str("yes ");
+					break;
+					case SECONDS_NO:
+						display_str("no  ");
+					break;
+					case SECONDS_FAST:
+						display_str("fast ");
+					break;
+				}
+			} else {
+				displaymode = SHOW_TIME;
+				return;
+			}
+		}
+		if (just_pressed & 0x4) {
+			just_pressed = 0;
+			if (mode == SET_SECONDS) {
+				switch (seconds) {
+					case SECONDS_YES:
+						seconds = SECONDS_NO;
+						display_str("no  ");
+					break;
+					case SECONDS_NO:
+						seconds = SECONDS_FAST;
+						display_str("fast ");
+					break;
+						case SECONDS_FAST:
+						seconds = SECONDS_YES;
+						display_str("yes ");
+					break;
+				}
+				eeprom_write_byte((uint8_t *)EE_SECONDS, seconds);
+			}
+		}
+	}	
 }
 
+void set_region(void) {
+	uint8_t mode = SHOW_MENU;
 
-/*
+	timeoutcounter = INACTIVITYTIMEOUT;;  
+	region = eeprom_read_byte((uint8_t *)EE_REGION);
+
+	while (1) {
+		if (just_pressed || pressed) {
+			timeoutcounter = INACTIVITYTIMEOUT;;  
+			// timeout w/no buttons pressed after 3 seconds?
+		} else if (!timeoutcounter) {
+			//timed out!
+			displaymode = SHOW_TIME;     
+			return;
+		}
+		if (just_pressed & 0x1) { // mode change
+			return;
+		}
+		if (just_pressed & 0x2) {
+			just_pressed = 0;
+			if (mode == SHOW_MENU) {
+				// start!
+				mode = SET_REG;
+				// display region
+				if (region == REGION_US) {
+					display_str("usa-12hr");
+				} else {
+					display_str("eur-24hr");
+				}
+			} else {	
+				displaymode = SHOW_TIME;
+				return;
+			}
+		}
+		if (just_pressed & 0x4) {
+			just_pressed = 0;
+			if (mode == SET_REG) {
+				region = !region;
+				if (region == REGION_US) {
+					display_str("usa-12hr");
+				} else {
+					display_str("eur-24hr");
+				}
+				eeprom_write_byte((uint8_t *)EE_REGION, region);
+			}
+		}
+	}
+}
+
 void set_snooze(void) {
   uint8_t mode = SHOW_MENU;
   uint8_t snooze;
@@ -1172,7 +1285,6 @@ void set_snooze(void) {
     }
   }
 }
-*/
 
 
 /**************************** RTC & ALARM *****************************/
@@ -1321,7 +1433,21 @@ void beep(uint16_t freq, uint8_t times) {
   PORTB &= ~_BV(SPK1) & ~_BV(SPK2);
 }
 
+void dan_beep(uint16_t freq, uint16_t length) {
+  // set the PWM output to match the desired frequency
+  ICR1 = (F_CPU/8)/freq;
+  // we want 50% duty cycle square wave
+  OCR1A = OCR1B = ICR1/2;
 
+  TCCR1B |= _BV(CS11); // turn it on!
+  _delay_ms(length);
+  TCCR1B &= ~_BV(CS11); // turn it off!
+  PORTB &= ~_BV(SPK1) & ~_BV(SPK2);
+  _delay_ms(length);
+
+  // turn speaker off
+  PORTB &= ~_BV(SPK1) & ~_BV(SPK2);
+}
 
 /**************************** BOOST *****************************/
 
@@ -1479,30 +1605,100 @@ void display_date(uint8_t style) {
 
 // This displays a time on the clock
 void display_time(uint8_t h, uint8_t m, uint8_t s) {
-  
-  // seconds and minutes are at the end
-  display[8] =  pgm_read_byte(numbertable_p + (s % 10));
-  display[7] =  pgm_read_byte(numbertable_p + (s / 10));
-  display[6] = 0;
-  display[5] =  pgm_read_byte(numbertable_p + (m % 10));
-  display[4] =  pgm_read_byte(numbertable_p + (m / 10)); 
-  display[3] = 0;
+	if ( (seconds == SECONDS_NO) || (seconds == SECONDS_FAST) ) {
+		if (displaymode == SHOW_TIME) {
+			display[8] =  0;
+			display[7] =  0;
+			if (seconds == SECONDS_FAST) {
+				display[6] =  pgm_read_byte(numbertable_p + (s % 10));
+				display[5] =  pgm_read_byte(numbertable_p + (s / 10));
+			} else {
+				display[6] =  0;
+				display[5] =  0;
+			}
+			display[4] =  pgm_read_byte(numbertable_p + (m % 10));
+			display[3] =  pgm_read_byte(numbertable_p + (m / 10));
+		// check euro (24h) or US (12h) style time
+			if (region == REGION_US) {
+				display[2] =  pgm_read_byte(numbertable_p + ( (((h+11)%12)+1) % 10));
+			// strip off leading 0
+				if ( (h != 10) && (h != 11) && (h != 12) && (h != 0) )
+					display[1] = 0;
+				else
+					display[1] =  pgm_read_byte(numbertable_p + ( (((h+11)%12)+1) / 10));
 
-  // check euro (24h) or US (12h) style time
-  if (region == REGION_US) {
-    display[2] =  pgm_read_byte(numbertable_p + ( (((h+11)%12)+1) % 10));
-    display[1] =  pgm_read_byte(numbertable_p + ( (((h+11)%12)+1) / 10));
+			// We use the '*' as an am/pm notice
+				if (h >= 12) {
+					display[0] |= 0x1;  // 'pm' notice
+					if (seconds == SECONDS_NO) display[6] = pgm_read_byte(alphatable_p + 'p' - 'a');
+				}
+				else {
+					display[0] &= ~0x1;  // 'pm' notice
+					if (seconds == SECONDS_NO) display[6] = pgm_read_byte(alphatable_p + 'a' - 'a');
+				}
+			} else {
+				display[2] =  pgm_read_byte(numbertable_p + ( (h%24) % 10));
+				display[1] =  pgm_read_byte(numbertable_p + ( (h%24) / 10));
+			}
+			if (seconds == SECONDS_NO) {
+				if (s % 2) 
+					display[2] |= 0x1;
+				else 
+					display[2] &= ~0x1;
+			}
+			if (seconds == SECONDS_FAST) {
+				display[2] |= 0x1;
+				display[4] |= 0x1;
+			}
+		} else {
+			display[8] =  pgm_read_byte(numbertable_p + (s % 10));
+			display[7] =  pgm_read_byte(numbertable_p + (s / 10));
+			display[6] = 0;
+			display[5] =  pgm_read_byte(numbertable_p + (m % 10));
+			display[4] =  pgm_read_byte(numbertable_p + (m / 10));
+			display[3] = 0;
 
-    // We use the '*' as an am/pm notice
-    if (h >= 12)
-      display[0] |= 0x1;  // 'pm' notice
-    else 
-      display[0] &= ~0x1;  // 'pm' notice
-  } else {
-    display[2] =  pgm_read_byte(numbertable_p + ( (h%24) % 10));
-    display[1] =  pgm_read_byte(numbertable_p + ( (h%24) / 10));
-  }
+			// check euro (24h) or US (12h) style time
+			if (region == REGION_US) {
+				display[2] =  pgm_read_byte(numbertable_p + ( (((h+11)%12)+1) % 10));
+				display[1] =  pgm_read_byte(numbertable_p + ( (((h+11)%12)+1) / 10));
+
+				// We use the '*' as an am/pm notice
+				if (h >= 12)
+					display[0] |= 0x1;  // 'pm' notice
+				else
+					display[0] &= ~0x1;  // 'pm' notice
+			} else {
+				display[2] =  pgm_read_byte(numbertable_p + ( (h%24) % 10));
+				display[1] =  pgm_read_byte(numbertable_p + ( (h%24) / 10));
+			}
+		}
+	} else {
+		// seconds and minutes are at the end
+		display[8] =  pgm_read_byte(numbertable_p + (s % 10));
+		display[7] =  pgm_read_byte(numbertable_p + (s / 10));
+		display[6] = 0;
+		display[5] =  pgm_read_byte(numbertable_p + (m % 10));
+		display[4] =  pgm_read_byte(numbertable_p + (m / 10));
+		display[3] = 0;
+
+		// check euro (24h) or US (12h) style time
+		if (region == REGION_US) {
+			display[2] =  pgm_read_byte(numbertable_p + ( (((h+11)%12)+1) % 10));
+			display[1] =  pgm_read_byte(numbertable_p + ( (((h+11)%12)+1) / 10));
+
+			// We use the '*' as an am/pm notice
+			if (h >= 12)
+				display[0] |= 0x1;  // 'pm' notice
+			else
+				display[0] &= ~0x1;  // 'pm' notice
+		} else {
+			display[2] =  pgm_read_byte(numbertable_p + ( (h%24) % 10));
+			display[1] =  pgm_read_byte(numbertable_p + ( (h%24) / 10));
+		}
+	}
 }
+
 
 // Kinda like display_time but just hours and minutes
 void display_alarm(uint8_t h, uint8_t m){ 

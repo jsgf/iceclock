@@ -21,6 +21,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 ****************************************************************************/
 
+/* Custom Settings */
 
 #define halt(x)  while (1)
 
@@ -30,6 +31,10 @@ THE SOFTWARE.
 
 #define REGION_US 0
 #define REGION_EU 1
+
+#define SECONDS_NO 0
+#define SECONDS_YES 1
+#define SECONDS_FAST 2
 
 // date format
 #define DATE 0  // mm-dd-yy
@@ -58,6 +63,7 @@ THE SOFTWARE.
 #define EE_VOLUME 10
 #define EE_REGION 11
 #define EE_SNOOZE 12
+#define EE_SECONDS 13
 
 void delay(uint16_t delay);
 
@@ -81,8 +87,10 @@ void set_brightness(void);
 void set_volume(void);
 void set_region(void);
 void set_snooze(void); // not activated by default
+void set_seconds(void);
 
 void beep(uint16_t freq, uint8_t times);
+void dan_beep(uint16_t freq, uint16_t length);
 void tick(void);
 
 uint8_t leapyear(uint16_t y);
@@ -106,6 +114,7 @@ void spi_xfer(uint8_t c);
 #define SET_REGION 8
 #define SHOW_SNOOZE 9
 #define SET_SNOOZE 10
+#define SET_SNOOZE 11
 
 // sub-mode settings
 #define SHOW_MENU 0
@@ -123,6 +132,8 @@ void spi_xfer(uint8_t c);
 #define SET_VOL 1
 //region
 #define SET_REG 1
+//display seconds?
+#define SET_SECONDS 1
 
 #define BOOST PD6
 #define BOOST_DDR DDRD

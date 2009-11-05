@@ -42,3 +42,14 @@ const uint8_t numbertable[] PROGMEM = {
   0xE6, /* 9 */
 };
 PGM_P numbertable_p PROGMEM = numbertable;
+
+#define DIGIT_0 0xFC
+#define DIGIT_1 0x60
+#define DIGIT_2 0xDA
+#define DIGIT_3 0xF2
+#define DIGIT_4 0x66
+#define DIGIT_5 0xB6
+#define DIGIT_6 0xBE
+#define DIGIT_7 0xE0
+#define DIGIT_8 0xFE
+#define DIGIT_9 0xE6
