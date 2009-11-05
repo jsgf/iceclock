@@ -40,6 +40,12 @@ THE SOFTWARE.
 #define MAXSNOOZE 600 // 10 minutes
 #define INACTIVITYTIMEOUT 10 // how many seconds we will wait before turning off menus
 
+#define BRIGHTNESS_MAX 90
+#define BRIGHTNESS_MIN 30
+#define BRIGHTNESS_INCREMENT 5
+
+// Closer to 255 means the room has to be darker for the dimmer to kick in.
+#define DIMMER_THRESHOLD 224 
 
 #define BEEP_8KHZ 5
 #define BEEP_4KHZ 10
@@ -58,6 +64,7 @@ THE SOFTWARE.
 #define EE_VOLUME 10
 #define EE_REGION 11
 #define EE_SNOOZE 12
+#define EE_DIMMER 13
 
 void delay(uint16_t delay);
 
@@ -67,7 +74,10 @@ void clock_init(void);
 void initbuttons(void);
 void boost_init(uint8_t pwm);
 void vfd_init(void);
+void set_vfd_brightness(uint8_t brightness);
 void speaker_init(void);
+void dimmer_init(void);
+void dimmer_update(void);
 
 void display_time(uint8_t h, uint8_t m, uint8_t s);
 void display_date(uint8_t style);
@@ -78,6 +88,7 @@ void set_time(void);
 void set_alarm(void);
 void set_date(void);
 void set_brightness(void);
+void set_dimmer(void);
 void set_volume(void);
 void set_region(void);
 void set_snooze(void); // not activated by default
@@ -106,6 +117,8 @@ void spi_xfer(uint8_t c);
 #define SET_REGION 8
 #define SHOW_SNOOZE 9
 #define SET_SNOOZE 10
+#define SET_DIMMER 11
+#define TESTMODE 12
 
 // sub-mode settings
 #define SHOW_MENU 0
@@ -123,6 +136,8 @@ void spi_xfer(uint8_t c);
 #define SET_VOL 1
 //region
 #define SET_REG 1
+//dimmer
+#define SET_DIM 1
 
 #define BOOST PD6
 #define BOOST_DDR DDRD
@@ -157,6 +172,12 @@ void spi_xfer(uint8_t c);
 #define SPK2 PB2
 #define SPK_PORT PORTB
 #define SPK_DDR DDRB
+
+#define DIMMER_POWER_PORT PORTC
+#define DIMMER_POWER_DDR DDRC
+#define DIMMER_POWER_PIN PC5
+#define DIMMER_SENSE_PIN MUX2
+#define DIMMER_SENSE_PIND ADC4D
 
 #define SEG_A 19
 #define SEG_B 17

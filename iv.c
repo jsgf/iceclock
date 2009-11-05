@@ -2,6 +2,10 @@
  Ice Tube Clock firmware August 13, 2009
  (c) 2009 Limor Fried / Adafruit Industries
 
+ Modified from the firmware posted on Sept 30, 2009 by Dave Parker to add
+ support for a photoresistor dimmer. Use a 10K resistor as R4 and a CdS
+ photocell as the sensor next to the piezo speaker.
+
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
 in the Software without restriction, including without limitation the rights
@@ -20,6 +24,8 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 ****************************************************************************/
+
+
 
 
 #include <avr/io.h>      
@@ -43,6 +49,9 @@ volatile uint8_t date_m, date_d, date_y;
 
 // how loud is the speaker supposed to be?
 volatile uint8_t volume;
+
+// whether the auto dimmer is turned on, and brightness set by user
+volatile uint8_t dimmer_on, brightness_level, dimmer_status;
 
 // whether the alarm is on, going off, and alarm time
 volatile uint8_t alarm_on, alarming, alarm_h, alarm_m;
@@ -348,6 +357,8 @@ SIGNAL (TIMER2_OVF_vect) {
     snoozetimer = 0;
   }
 
+  dimmer_update();
+
   if (timeoutcounter)
     timeoutcounter--;
   if (buttonholdcounter)
@@ -390,6 +401,7 @@ SIGNAL(SIG_COMPARATOR) {
       TCCR0B = 0; // no boost
       volume = 0; // low power buzzer
       PCICR = 0;  // ignore buttons
+      DIMMER_POWER_PORT &= ~_BV(DIMMER_POWER_PIN); // no power to photoresistor
 
       app_start();
     }
@@ -405,7 +417,130 @@ SIGNAL(SIG_COMPARATOR) {
     }
   }
 }
+
 /*********************** Main app **********/
+void testmode(void) {
+  uint8_t seconds;
+  uint8_t alarm_state;
+  uint8_t testdigit=0;
+  uint8_t testvalue=0;
+  uint8_t testexit=5;
+  uint8_t dim_on, dim_status;
+  
+  if ((PIND & _BV(BUTTON1))) {
+    return;
+  }
+  if((PIND & _BV(BUTTON3))) {
+      return;
+    }
+  dim_on = dimmer_on;
+  beep(2000,1);
+  beep(3000,1);
+  beep(4000,1);
+  while (!(PIND & _BV(BUTTON1)));
+  while (!(PIND & _BV(BUTTON3)));
+  for(uint8_t i=0;i<9;i++)
+    display[i] = 0;
+  displaymode = NONE;
+  while(1) {
+    kickthedog();
+    if(just_pressed&1)
+    {
+      beep(2000,1);
+      just_pressed &= ~1;
+      if((testdigit==0))
+      {
+        if(display[0]==0)
+          display[0]=1;
+        else if (display[0]==1)
+          display[0]=2;
+        else
+        {
+          display[0]=0;
+          testdigit++;
+          display[testdigit]=1;
+        }
+      }
+      else
+      {
+        display[testdigit]<<=1;
+        if(display[testdigit]==0)
+        {
+          testdigit++;
+          if(testdigit==9)
+            testdigit=0;
+          else
+            display[testdigit]=1;
+        }
+      }
+        
+    }
+    if(just_pressed&2)
+    {
+      beep(2500,1);
+      just_pressed &= ~2;
+      if(!dimmer_on)
+      {
+        dimmer_on = 1;
+        dimmer_update();
+      }
+    }
+    if(just_pressed&4)
+    {
+      beep(3000,1);
+      just_pressed &= ~4;
+      if(dimmer_on)
+      {
+        dimmer_on = 0;
+        set_vfd_brightness(brightness_level);
+      }
+      
+    }
+    if(seconds != time_s)
+    {
+      time_s = seconds;
+      tick();
+      if(!(PIND & _BV(BUTTON1))) {
+        if(!(PIND & _BV(BUTTON3))) {
+          testexit--;
+          if(testexit==0)
+          {
+            while (!(PIND & _BV(BUTTON1)));
+            while (!(PIND & _BV(BUTTON3)));
+            beep(4000,1);
+            beep(3000,1);
+            beep(2000,1);
+            dimmer_on = dim_on;
+            if(dimmer_on)
+              dimmer_update();
+            else
+              set_vfd_brightness(brightness_level);
+            return;
+          }
+        }
+        else
+          testexit=5;
+      }
+      else
+      {
+        testexit=5;
+      }
+    }
+    if(alarm_state != alarm_on)
+    {
+      alarm_state = alarm_on;
+      beep(4000,1 + alarm_on);
+    }
+    if(dim_status != dimmer_status)
+    {
+      dim_status = dimmer_status;
+      beep(3500,1 + dimmer_status);
+    }
+    
+    
+
+  }
+}
 
 uint32_t t;
 
@@ -423,6 +558,7 @@ void gotosleep(void) {
   TCCR0B = 0; // no boost
   volume = 0; // low power buzzer
   PCICR = 0;  // ignore buttons
+  DIMMER_POWER_PORT &= ~_BV(DIMMER_POWER_PIN); // no power to photoresistor
 
   // sleep time!
   //beep(3520, 1);
@@ -469,8 +605,11 @@ void gotosleep(void) {
    // turn on pullups
    initbuttons();
 
+   dimmer_init();
+
    // turn on boost
-   boost_init(eeprom_read_byte((uint8_t *)EE_BRIGHT));
+   brightness_level = eeprom_read_byte((uint8_t *)EE_BRIGHT);
+   boost_init(brightness_level);
 
    // turn on vfd control
    vfd_init();
@@ -494,11 +633,10 @@ void gotosleep(void) {
    kickthedog();
  }
 
-
 void initbuttons(void) {
     DDRB =  _BV(VFDCLK) | _BV(VFDDATA) | _BV(SPK1) | _BV(SPK2);
     DDRD = _BV(BOOST) | _BV(VFDSWITCH);
-    DDRC = _BV(VFDLOAD) | _BV(VFDBLANK) | _BV(4);
+    DDRC = _BV(VFDLOAD) | _BV(VFDBLANK);
     PORTD = _BV(BUTTON1) | _BV(BUTTON3) | _BV(ALARM);
     PORTB = _BV(BUTTON2);
 
@@ -507,11 +645,16 @@ void initbuttons(void) {
     PCMSK2 = _BV(PCINT21) | _BV(PCINT20);    
 }
 
-
-
 int main(void) {
   //  uint8_t i;
   uint8_t mcustate;
+  uint8_t test=0;
+  
+  if (! (PIND & _BV(BUTTON1))) {
+    if(!(PIND & _BV(BUTTON3))) {
+      test=1;
+    }
+  }
 
   // turn boost off
   TCCR0B = 0;
@@ -544,7 +687,6 @@ int main(void) {
   //DEBUGP("turning on anacomp");
   // set up analog comparator
   ACSR = _BV(ACBG) | _BV(ACIE); // use bandgap, intr. on toggle!
-  _delay_ms(1);
   // settle!
   if (ACSR & _BV(ACO)) {
     // hmm we should not interrupt here
@@ -572,9 +714,12 @@ int main(void) {
     displaymode = SHOW_TIME;
     DEBUGP("vfd init");
     vfd_init();
-    
+   
+    dimmer_init();
+ 
     DEBUGP("boost init");
-    boost_init(eeprom_read_byte((uint8_t *)EE_BRIGHT));
+    brightness_level = eeprom_read_byte((uint8_t *)EE_BRIGHT);
+    boost_init(brightness_level);
     sei();
 
     region = eeprom_read_byte((uint8_t *)EE_REGION);
@@ -589,6 +734,8 @@ int main(void) {
 
     DEBUGP("alarm init");
     setalarmstate();
+    if(test)
+      testmode();
   }
   DEBUGP("done");
   while (1) {
@@ -626,6 +773,11 @@ int main(void) {
 	set_brightness();
 	break;
       case (SET_BRIGHTNESS):
+	displaymode = SET_DIMMER;
+	display_str("set dimr");
+	set_dimmer();
+	break;
+      case (SET_DIMMER):
 	displaymode = SET_VOLUME;
 	display_str("set vol ");
 	set_volume();
@@ -930,10 +1082,8 @@ void set_date(void) {
 
 void set_brightness(void) {
   uint8_t mode = SHOW_MENU;
-  uint8_t brightness;
 
   timeoutcounter = INACTIVITYTIMEOUT;;  
-  brightness = eeprom_read_byte((uint8_t *)EE_BRIGHT);
 
   while (1) {
     if (just_pressed || pressed) {
@@ -942,7 +1092,7 @@ void set_brightness(void) {
     } else if (!timeoutcounter) {
       //timed out!
       displaymode = SHOW_TIME;     
-      eeprom_write_byte((uint8_t *)EE_BRIGHT, brightness);
+      eeprom_write_byte((uint8_t *)EE_BRIGHT, brightness_level);
       return;
     }
     if (just_pressed & 0x1) { // mode change
@@ -955,57 +1105,78 @@ void set_brightness(void) {
 	// start!
 	mode = SET_BRITE;
 	// display brightness
+        set_vfd_brightness(brightness_level);
 	display_str("brite ");
-	display[7] = pgm_read_byte(numbertable_p + (brightness / 10)) | 0x1;
-	display[8] = pgm_read_byte(numbertable_p + (brightness % 10)) | 0x1;
+	display[7] = pgm_read_byte(numbertable_p + (brightness_level / 10)) | 0x1;
+	display[8] = pgm_read_byte(numbertable_p + (brightness_level % 10)) | 0x1;
       } else {	
 	displaymode = SHOW_TIME;
-	eeprom_write_byte((uint8_t *)EE_BRIGHT, brightness);
+	eeprom_write_byte((uint8_t *)EE_BRIGHT, brightness_level);
 	return;
       }
     }
     if ((just_pressed & 0x4) || (pressed & 0x4)) {
       just_pressed = 0;
       if (mode == SET_BRITE) {
-	brightness += 5;
-	if (brightness > 91)
-	  brightness = 30;
-	display[7] = pgm_read_byte(numbertable_p + (brightness / 10)) | 0x1;
-	display[8] = pgm_read_byte(numbertable_p + (brightness % 10)) | 0x1;
-	if (brightness <= 30) {
-	  OCR0A = 30; 
-	} else if (brightness <= 35) {
-	  OCR0A = 35;
-	} else if (brightness <= 40) {
-	  OCR0A = 40;
-	} else if (brightness <= 45) {
-	  OCR0A = 45;
-	} else if (brightness <= 50) {
-	  OCR0A = 50;
-	} else if (brightness <= 55) {
-	  OCR0A = 55;
-	} else if (brightness <= 60) {
-	  OCR0A = 60;
-	} else if (brightness <= 65) {
-	  OCR0A = 65;
-	} else if (brightness <= 70) {
-	  OCR0A = 70;
-	} else if (brightness <= 75) {
-	  OCR0A = 75;
-	} else if (brightness <= 80) {
-	  OCR0A = 80;
-	} else if (brightness <= 85) {
-	  OCR0A = 85;
-	} else if (brightness <= 90) {
-	  OCR0A = 90;
-	} else {
-	  OCR0A = 30;
-	}
+	brightness_level += BRIGHTNESS_INCREMENT;
+	if (brightness_level > BRIGHTNESS_MAX)
+	  brightness_level = BRIGHTNESS_MIN;
+	display[7] = pgm_read_byte(numbertable_p + (brightness_level / 10)) | 0x1;
+	display[8] = pgm_read_byte(numbertable_p + (brightness_level % 10)) | 0x1;
+        set_vfd_brightness(brightness_level);
       }
     }
   }
 }
 
+void set_dimmer(void) {
+  uint8_t mode = SHOW_MENU;
+
+  timeoutcounter = INACTIVITYTIMEOUT;;  
+
+  while (1) {
+    if (just_pressed || pressed) {
+      timeoutcounter = INACTIVITYTIMEOUT;;  
+      // timeout w/no buttons pressed after 3 seconds?
+    } else if (!timeoutcounter) {
+      //timed out!
+      displaymode = SHOW_TIME;     
+      return;
+    }
+    if (just_pressed & 0x1) { // mode change
+      return;
+    }
+    if (just_pressed & 0x2) {
+      just_pressed = 0;
+      if (mode == SHOW_MENU) {
+	// start!
+	mode = SET_DIMMER;
+	if (dimmer_on) {
+	  display_str("dimr on ");
+	} else {
+	  display_str("dimr off");
+	}
+      } else {	
+	displaymode = SHOW_TIME;
+	return;
+      }
+    }
+    if (just_pressed & 0x4) {
+      just_pressed = 0;
+      if (mode == SET_DIMMER) {
+	dimmer_on = !dimmer_on;
+	if (dimmer_on) {
+	  display_str("dimr on ");
+          dimmer_update();
+	} else {
+	  display_str("dimr off");
+          set_vfd_brightness(brightness_level);
+	}
+	eeprom_write_byte((uint8_t *)EE_DIMMER, dimmer_on);
+      }
+    }
+  }
+}
 
 void set_volume(void) {
   uint8_t mode = SHOW_MENU;
@@ -1066,9 +1237,6 @@ void set_volume(void) {
     }
   }
 }
-
-
-
 
 void set_region(void) {
   uint8_t mode = SHOW_MENU;
@@ -1322,50 +1490,49 @@ void beep(uint16_t freq, uint8_t times) {
 }
 
 
+/**************************** DIMMER ****************************/
+void dimmer_init(void) {
+
+  dimmer_on = eeprom_read_byte((uint8_t *)EE_DIMMER);
+
+  // Power for the photoresistor
+  DIMMER_POWER_DDR |= _BV(DIMMER_POWER_PIN); 
+  DIMMER_POWER_PORT |= _BV(DIMMER_POWER_PIN);
+
+  ADCSRA |= _BV(ADPS2)| _BV(ADPS1); // Set ADC prescalar to 64 - 125KHz sample rate @ 8MHz F_CPU
+  ADMUX |= _BV(REFS0);  // Set ADC reference to AVCC
+  ADMUX |= _BV(ADLAR);  // Left adjust ADC result to allow easy 8 bit reading
+  ADMUX |= _BV(DIMMER_SENSE_PIN);   // Set ADC input as ADC4 (PC4)
+  DIDR0 |= _BV(DIMMER_SENSE_PIND); // Disable the digital imput buffer on the sense pin to save power.
+  ADCSRA |= _BV(ADEN);  // Enable ADC
+  ADCSRA |= _BV(ADIE);  // Enable ADC interrupt
+}
+
+// Start ADC conversion for dimmer
+void dimmer_update(void) {
+  if (dimmer_on) 
+    ADCSRA |= _BV(ADSC);
+}
+
+// Update brightness once ADC measurement completes
+SIGNAL(SIG_ADC) {
+  dimmer_status = (ADCH > DIMMER_THRESHOLD)?1:0;
+  if (!dimmer_on || displaymode == SET_BRIGHTNESS)
+    return;
+  if (ADCH > DIMMER_THRESHOLD) { // bigger number means darker room
+    set_vfd_brightness(BRIGHTNESS_MIN);
+  } else {
+    set_vfd_brightness(brightness_level);
+  }
+} 
 
 /**************************** BOOST *****************************/
 
 // We control the boost converter by changing the PWM output
 // pins
 void boost_init(uint8_t brightness) {
-  // Set PWM value, don't set it so high that
-  // we could damage the MAX chip or display
-  if (brightness > 90)
-    brightness = 90;
 
-  // Or so low its not visible
-  if (brightness < 30)
-    brightness = 30;
-
-  if (brightness <= 30) {
-    OCR0A = 30; 
-  } else if (brightness <= 35) {
-    OCR0A = 35;
-  } else if (brightness <= 40) {
-    OCR0A = 40;
-  } else if (brightness <= 45) {
-    OCR0A = 45;
-  } else if (brightness <= 50) {
-    OCR0A = 50;
-  } else if (brightness <= 55) {
-    OCR0A = 55;
-  } else if (brightness <= 60) {
-    OCR0A = 60;
-  } else if (brightness <= 65) {
-    OCR0A = 65;
-  } else if (brightness <= 70) {
-    OCR0A = 70;
-  } else if (brightness <= 75) {
-    OCR0A = 75;
-  } else if (brightness <= 80) {
-    OCR0A = 80;
-  } else if (brightness <= 85) {
-    OCR0A = 85;
-  } else if (brightness <= 90) {
-    OCR0A = 90;
-  } else {
-    OCR0A = 30;
-  }
+  set_vfd_brightness(brightness);
 
   // fast PWM, set OC0A (boost output pin) on match
   TCCR0A = _BV(WGM00) | _BV(WGM01);  
@@ -1376,6 +1543,27 @@ void boost_init(uint8_t brightness) {
   TCCR0A |= _BV(COM0A1);
   TIMSK0 |= _BV(TOIE0); // turn on the interrupt for muxing
   sei();
+}
+
+void set_vfd_brightness(uint8_t brightness) {
+  // Set PWM value, don't set it so high that
+  // we could damage the MAX chip or display
+  if (brightness > BRIGHTNESS_MAX)
+    brightness = BRIGHTNESS_MAX;
+
+  // Or so low its not visible
+  if (brightness < BRIGHTNESS_MIN)
+    brightness = BRIGHTNESS_MIN;
+
+  // Round up to the next brightness increment
+  if (brightness % BRIGHTNESS_INCREMENT != 0) {
+    brightness += BRIGHTNESS_INCREMENT - (brightness % BRIGHTNESS_INCREMENT);
+  }
+
+  if (OCR0A == brightness)
+    return;
+
+  OCR0A = brightness;
 }
 
 /**************************** DISPLAY *****************************/
@@ -1491,7 +1679,11 @@ void display_time(uint8_t h, uint8_t m, uint8_t s) {
   // check euro (24h) or US (12h) style time
   if (region == REGION_US) {
     display[2] =  pgm_read_byte(numbertable_p + ( (((h+11)%12)+1) % 10));
-    display[1] =  pgm_read_byte(numbertable_p + ( (((h+11)%12)+1) / 10));
+    if ((((h+11)%12)+1) / 10 == 0 ) {
+      display[1] =  0;
+    } else {
+      display[1] =  pgm_read_byte(numbertable_p + 1);
+    }
 
     // We use the '*' as an am/pm notice
     if (h >= 12)
@@ -1525,9 +1717,13 @@ void display_alarm(uint8_t h, uint8_t m){
     display[8] = pgm_read_byte(alphatable_p + 'm' - 'a');
 
     display[2] =  pgm_read_byte(numbertable_p + ( (((h+11)%12)+1) % 10));
-    display[1] =  pgm_read_byte(numbertable_p + ( (((h+11)%12)+1) / 10));
+    if ((((h+11)%12)+1) / 10 == 0 ) {
+      display[1] =  0;
+    } else {
+      display[1] =  pgm_read_byte(numbertable_p + 1);
+    }
   } else {
-      display[2] =  pgm_read_byte(numbertable_p + ( (((h+23)%24)+1) % 10));
+    display[2] =  pgm_read_byte(numbertable_p + ( (((h+23)%24)+1) % 10));
     display[1] =  pgm_read_byte(numbertable_p + ( (((h+23)%24)+1) / 10));
   }
 }
