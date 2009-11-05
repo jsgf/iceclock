@@ -43,9 +43,9 @@ CFLAGS = -g -O$(OPT) \
 -funsigned-char -funsigned-bitfields -fpack-struct -fshort-enums \
 -Wall -Wstrict-prototypes \
 -DF_CPU=$(F_CPU) \
-`perl timedef.pl` \
 -Wa,-adhlns=$(<:.c=.lst) \
 $(patsubst %,-I%,$(EXTRAINCDIRS))
+#`perl timedef.pl` \
 
 
 # Set a "language standard" compiler flag.

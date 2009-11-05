@@ -1,6 +1,9 @@
 /***************************************************************************
  Ice Tube Clock firmware August 13, 2009
  (c) 2009 Limor Fried / Adafruit Industries
+ Modifications by Len Popp
+ Original auto-dimmer mod by Dave Parker
+ Button interrupt fix by caitsith2
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -21,6 +24,11 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 ****************************************************************************/
 
+// Optional Features - #define these or not as desired.
+// Auto-dimmer - requires a photocell hooked up to the hax0r port
+#define FEATURE_AUTODIM
+// Display digit "9" in the usual way (instead of the default with no bottom segment)
+#define FEATURE_9
 
 #define halt(x)  while (1)
 
@@ -38,8 +46,14 @@ THE SOFTWARE.
 #define DISPLAYSIZE 9
 
 #define MAXSNOOZE 600 // 10 minutes
-#define INACTIVITYTIMEOUT 10 // how many seconds we will wait before turning off menus
+#define INACTIVITYTIMEOUT 5 // how many seconds we will wait before turning off menus
 
+#define BRIGHTNESS_MAX 90
+#define BRIGHTNESS_MIN 30
+#define BRIGHTNESS_INCREMENT 5
+
+#define PHOTOCELL_DARK 1010
+#define PHOTOCELL_LIGHT 500
 
 #define BEEP_8KHZ 5
 #define BEEP_4KHZ 10
@@ -67,12 +81,19 @@ void clock_init(void);
 void initbuttons(void);
 void boost_init(uint8_t pwm);
 void vfd_init(void);
+void set_vfd_brightness(uint8_t brightness);
 void speaker_init(void);
+
+#ifdef FEATURE_AUTODIM
+void dimmer_init(void);
+void dimmer_update(void);
+#endif
 
 void display_time(uint8_t h, uint8_t m, uint8_t s);
 void display_date(uint8_t style);
 void display_str(char *s);
 void display_alarm(uint8_t h, uint8_t m);
+void display_brightness(int brightness);
 
 void set_time(void);
 void set_alarm(void);
@@ -157,6 +178,12 @@ void spi_xfer(uint8_t c);
 #define SPK2 PB2
 #define SPK_PORT PORTB
 #define SPK_DDR DDRB
+
+#define DIMMER_POWER_PORT PORTC
+#define DIMMER_POWER_DDR DDRC
+#define DIMMER_POWER_PIN PC5
+#define DIMMER_SENSE_PIN MUX2
+#define DIMMER_SENSE_PIND ADC4D
 
 #define SEG_A 19
 #define SEG_B 17
