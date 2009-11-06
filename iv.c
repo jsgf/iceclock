@@ -1553,7 +1553,8 @@ int main(void) {
     volume = eeprom_read_byte((uint8_t *)EE_VOLUME);
     speaker_init();
 
-    beep(4000, 1);
+    if (timeunknown)
+      beep(4000, 1);
   }
   
   SMCR = _BV(SE); // idle mode
