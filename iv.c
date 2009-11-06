@@ -183,7 +183,7 @@ digraph switch {
 }
 */
 
-#define DEBOUNCE	10	/* ms button must be pressed to be noticed */
+#define DEBOUNCE	20	/* ms button must be pressed to be noticed */
 
 #define REPT_INIT	800	/* ms before repeat starts */
 #define REPT_RATE	60	/* ms between repeats */
