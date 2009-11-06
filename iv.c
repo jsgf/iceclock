@@ -241,6 +241,7 @@ SIGNAL(SIG_PIN_CHANGE2) {
     last_buttonstate &= ~0x4;
   }
 out:
+  cli();
   PCMSK2 = _BV(PCINT21) | _BV(PCINT20);
 }
 
@@ -268,6 +269,7 @@ SIGNAL(SIG_PIN_CHANGE0) {
     last_buttonstate &= ~0x2;
   }
 out:
+  cli();
   PCMSK0 = _BV(PCINT0);
 }
 
@@ -380,6 +382,7 @@ SIGNAL(SIG_INTERRUPT0) {
     goto out;
   setalarmstate();
 out:
+  cli();
   EIMSK = _BV(INT0);  //And reenable it before exiting.
 }
 
