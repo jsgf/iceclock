@@ -589,7 +589,7 @@ SIGNAL(SIG_INTERRUPT0) {
   EIMSK = 0;  //Disable this interrupt while we are processing it.
   uart_putchar('i');
 
-  state = !(ALARM_PIN & _BV(ALARM));
+  state = (ALARM_PIN & _BV(ALARM));
   button_change_intr(BUT_ALARM, state);
 
   /* Turn off alarm immediately */
@@ -1453,7 +1453,7 @@ void initbuttons(void) {
   button_change_intr(BUT_MENU, !(PIND & _BV(BUTTON1)));
   button_change_intr(BUT_SET,  !(PINB & _BV(BUTTON2)));
   button_change_intr(BUT_NEXT, !(PIND & _BV(BUTTON3)));
-  button_change_intr(BUT_ALARM, !(ALARM_PIN & _BV(ALARM)));
+  button_change_intr(BUT_ALARM, (ALARM_PIN & _BV(ALARM)));
 }
 
 static void ui(void)
