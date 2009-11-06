@@ -200,7 +200,7 @@ ALL_ASFLAGS = -mmcu=$(MCU) -I. -x assembler-with-cpp $(ASFLAGS)
 all: begin gccversion sizebefore $(TARGET).elf $(TARGET).hex $(TARGET).eep \
 	$(TARGET).lss $(TARGET).sym sizeafter finished end
 
-full: $(TARGET).hex $(TARGET).eep
+full: $(TARGET).hex $(TARGET)eep.hex
 	$(AVRDUDE) $(AVRDUDE_FLAGS) -u -U lfuse:w:0xE2:m -u -U hfuse:w:0xc6:m
 	$(AVRDUDE) $(AVRDUDE_FLAGS) -B 1 -U flash:w:$< 
 	$(AVRDUDE) $(AVRDUDE_FLAGS) -B 1 -U eeprom:w:iveep.hex
