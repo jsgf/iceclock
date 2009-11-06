@@ -230,8 +230,6 @@ static void button_change_intr(uint8_t button, uint8_t state)
   uint8_t bmask;
   uint8_t bstate;
 
-  cli();
-
   bmask = BMASK(button);
   bstate = button_state & bmask;
 
@@ -249,8 +247,6 @@ static void button_change_intr(uint8_t button, uint8_t state)
 
   /* update state */
   button_state = (button_state & ~bmask) | bstate;
-
-  sei();
 }
 
 /* Called every millisecond(ish) to update button state */
@@ -408,24 +404,13 @@ SIGNAL (SIG_OVERFLOW0) {
 
 // This interrupt detects switches 1 and 3
 SIGNAL(SIG_PIN_CHANGE2) {
-  // allow interrupts while we're doing this
-  PCMSK2 = 0;
-  sei();
-
   button_change_intr(0, !(PIND & _BV(BUTTON1)));
   button_change_intr(2, !(PIND & _BV(BUTTON3)));
-
-  PCMSK2 = _BV(PCINT21) | _BV(PCINT20);
 }
 
 // Just button #2
 SIGNAL(SIG_PIN_CHANGE0) {
-  PCMSK0 = 0;
-  sei();
-
   button_change_intr(1, !(PINB & _BV(BUTTON2)));
-
-  PCMSK0 = _BV(PCINT0);
 }
 
 // This will calculate leapyears, give it the year
@@ -586,17 +571,12 @@ SIGNAL (TIMER2_OVF_vect) {
 SIGNAL(SIG_INTERRUPT0) {  
   uint8_t state;
 
-  EIMSK = 0;  //Disable this interrupt while we are processing it.
-  uart_putchar('i');
-
   state = (ALARM_PIN & _BV(ALARM));
   button_change_intr(BUT_ALARM, state);
 
   /* Turn off alarm immediately */
   if (!state)
     setalarmstate();
-
-  EIMSK = _BV(INT0);  //And reenable it before exiting.
 }
 
 
