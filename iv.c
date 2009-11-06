@@ -1491,9 +1491,12 @@ int main(void) {
   wdt_enable(WDTO_2S);
   kickthedog();
 
-  // we lost power at some point so lets alert the user
-  // that the time may be wrong (the clock still works)
-  timeunknown = 1;
+  if (mcustate & (PORF | EXTRF | BORF | WDRF)) {
+    /* We got restarted by an actual reset so we may have lost time.
+       If we were reset due to a switch to battery power (app_start),
+       mcustate will be all zero. */
+    timeunknown = 1;
+  }
 
   // have we read the time & date from eeprom?
   restored = 0;
