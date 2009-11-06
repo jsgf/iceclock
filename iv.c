@@ -399,15 +399,22 @@ static uint8_t scroll_left(uint8_t *statep)
 {
   uint8_t s = *statep;
 
-  if (s >= DISPLAYSIZE)
+  if (s >= DISPLAYSIZE*2)
     return 0;
 
-  memmove(output_display, output_display+1, DISPLAYSIZE-1);
-  output_display[DISPLAYSIZE-1] = display[s];
+  if (s == 0)
+    output_display[0] = display[0];
+  else { 
+    memmove(output_display+1, output_display+2, DISPLAYSIZE-2);
+    if (s < DISPLAYSIZE)
+      output_display[DISPLAYSIZE-1] = 0;
+    else
+      output_display[DISPLAYSIZE-1] = display[s-DISPLAYSIZE];    
+  }
 
   *statep = ++s;
 
-  return 1000/20;		/* 20fps */
+  return 1000/40;		/* 40fps */
 }
 
 static uint8_t flip(uint8_t *unused)
