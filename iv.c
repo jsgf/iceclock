@@ -705,7 +705,7 @@ static unsigned char show_second(unsigned char pos, unsigned char *v)
     return 2;
 
   case SEC_DIAL:
-    display[pos] = (0x80 >> (s / 10)) | ((s & 1) << 1);
+    display[pos] = (0x80 >> (s / 10)) | ((~s & 1) << 1);
     return 1;
 
   case SEC_AMPM:
