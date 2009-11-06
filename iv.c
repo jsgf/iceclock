@@ -80,20 +80,21 @@ static uint8_t restored = 0;
 
 // Our display buffer, which is updated to show the time/date/etc
 // and is multiplexed onto the tube
-uint8_t display[DISPLAYSIZE]; // stores segments, not values!
-uint8_t currdigit = 0;        // which digit we are currently multiplexing
+static uint8_t display[DISPLAYSIZE]; // stores segments, not values!
+static uint8_t output_display[DISPLAYSIZE]; // stores segments, not values!
+static uint8_t currdigit = 0;        // which digit we are currently multiplexing
 
 // This table allow us to index between what digit we want to light up
 // and what the pin number is on the MAX6921 see the .h for values.
 // Stored in ROM (PROGMEM) to save RAM
-const uint8_t digittable[] PROGMEM = {
+static const uint8_t digittable[] PROGMEM = {
   DIG_9, DIG_8, DIG_7, DIG_6, DIG_5, DIG_4, DIG_3, DIG_2, DIG_1
 };
 
 // This table allow us to index between what segment we want to light up
 // and what the pin number is on the MAX6921 see the .h for values.
 // Stored in ROM (PROGMEM) to save RAM
-const uint8_t segmenttable[] PROGMEM = {
+static const uint8_t segmenttable[] PROGMEM = {
   SEG_H, SEG_G,  SEG_F,  SEG_E,  SEG_D,  SEG_C,  SEG_B,  SEG_A 
 };
 
@@ -101,7 +102,7 @@ const uint8_t segmenttable[] PROGMEM = {
 // down so that we can refresh at about 100Hz (31.25KHz / 300)
 // We refresh the entire display at 100Hz so each digit is updated
 // 100Hz/DISPLAYSIZE
-uint16_t muxdiv = 0;
+static uint16_t muxdiv = 0;
 #define MUX_DIVIDER (300 / DISPLAYSIZE)
 
 // Likewise divides 100Hz down to 1Hz for the alarm beeping
@@ -144,16 +145,6 @@ void delayms(uint16_t ms) {
 
   while ((now() - start) < ms)
     sleep();
-}
-
-// When the alarm is going off, pressing a button turns on snooze mode
-// this sets the snoozetimer off in snooze seconds - which turns on
-// the alarm again
-void setsnooze(void) {
-  snoozetimer = snooze * 60; // convert minutes to seconds
-  DEBUGP("snooze");
-  display_str("snoozing");
-  delayms(1000);
 }
 
 // we reset the watchdog timer 
@@ -347,6 +338,102 @@ static uint8_t button_sample(uint8_t button)
   return ret;
 }
 
+/************************* LOW LEVEL DISPLAY ************************/
+
+// Setup SPI
+static void vfd_init(void) {
+  SPCR  = _BV(SPE) | _BV(MSTR) | _BV(SPR0);
+}
+
+// Send 1 byte via SPI
+static void spi_xfer(uint8_t c) {
+
+  SPDR = c;
+  while (! (SPSR & _BV(SPIF)));
+}
+
+// send raw data to display, its pretty straightforward. Just send 32 bits via SPI
+// the bottom 20 define the segments
+static void vfd_send(uint32_t d) {
+  // send lowest 20 bits
+  cli();       // to prevent flicker we turn off interrupts
+  spi_xfer(d >> 16);
+  spi_xfer(d >> 8);
+  spi_xfer(d);
+
+  // latch data
+  VFDLOAD_PORT |= _BV(VFDLOAD);
+  VFDLOAD_PORT &= ~_BV(VFDLOAD);
+  sei();
+}
+
+// This changes and updates the display
+// We use the digit/segment table to determine which
+// pins on the MAX6921 to turn on
+static void setdisplay(uint8_t digit, uint8_t segments) {
+  uint32_t d = 0;  // we only need 20 bits but 32 will do
+  uint8_t i;
+
+  // Set the digit selection pin
+  d |= _BV(pgm_read_byte(digittable + digit));
+
+  
+  // Set the individual segments for this digit
+  for (i=0; i<8; i++) {
+    if (segments & _BV(i)) {
+      uint32_t t = 1;
+      t <<= pgm_read_byte(segmenttable + i);
+      d |= t;
+    }
+  }
+
+  // Shift the data out to the display
+  vfd_send(d);
+}
+
+static uint8_t scroll_left(uint8_t *statep)
+{
+  uint8_t s = *statep;
+
+  if (s >= DISPLAYSIZE*2)
+    return 0;
+
+  if (s == 0)
+    output_display[0] = display[0];
+  else { 
+    memmove(output_display+1, output_display+2, DISPLAYSIZE-2);
+    if (s < DISPLAYSIZE)
+      output_display[DISPLAYSIZE-1] = 0;
+    else
+      output_display[DISPLAYSIZE-1] = display[s-DISPLAYSIZE];    
+  }
+
+  *statep = ++s;
+
+  return 1000/40;		/* 40fps */
+}
+
+static uint8_t flip(uint8_t *unused)
+{
+  memcpy(output_display, display, sizeof(output_display));
+  return 0;
+}
+
+static void flip_display(transition_t* trans)
+{
+  uint8_t state = 0;
+  uint8_t delay;
+
+  /* Disable interrupts while generating new output to prevent flickers */
+  cli();
+  while((delay = (*trans)(&state))) {
+    sei();
+    delayms(delay);
+    cli();
+  }
+  sei();
+}
+
 // called @ (F_CPU/256) = ~30khz (31.25 khz)
 SIGNAL (SIG_OVERFLOW0) {
   // allow other interrupts to go off while we're doing display updates
@@ -370,7 +457,7 @@ SIGNAL (SIG_OVERFLOW0) {
     currdigit = 0;
 
   // Set the current display's segments
-  setdisplay(currdigit, display[currdigit]);
+  setdisplay(currdigit, output_display[currdigit]);
   // and go to the next
   currdigit++;
 
@@ -510,7 +597,7 @@ static void save_brite(void)
   eeprom_write_byte((unsigned char *)EE_NIGHTBRITE, nightbrite);
 }
 
-static void set_brite(void)
+static uint8_t get_brite(void)
 {
   uint8_t b;
 
@@ -528,7 +615,12 @@ static void set_brite(void)
   if (b < BRITE_MIN || b > BRITE_MAX)
     b = BRITE_MIN;
 
-  OCR0A = b;
+  return b;
+}
+
+static void set_brite(void)
+{
+  OCR0A = get_brite();
 }
 
 /*
@@ -1021,7 +1113,6 @@ static const struct field snooze_fields[] PROGMEM = {
   { show_num_slz, update_mod60_s5, &snooze },
 };
 
-#define NELEM(a)	(sizeof(a) / sizeof(*a))
 static void copy_fields(const struct field PROGMEM *fields, unsigned int nelem)
 {
   memcpy_P(menu_state.fields, fields, nelem * sizeof(struct field));
@@ -1149,7 +1240,7 @@ static const struct entry mainmenu[] PROGMEM = {
   { "set secs", get_secmode, store_secmode },
 };
 
-static void display_entry(char highlight)
+static void display_entry(char highlight, transition_t *trans)
 {
   uint8_t pos, i;
   const struct field *field = menu_state.fields;
@@ -1172,6 +1263,8 @@ static void display_entry(char highlight)
 
   for (i = pos; i < DISPLAYSIZE; i++)
     display[i] = 0;
+
+  flip_display(trans);
 }
 
 /* Skip to next valid input field; left unchanged if already valid. */
@@ -1184,7 +1277,7 @@ static uint8_t skip_to_next_input(const struct field *field, unsigned char nfiel
   return next;
 }
 
-static void show_entry(const struct entry *entry)
+static void show_entry(const struct entry *entry, transition_t *trans)
 {
   const struct field *field;
   uint8_t input, nfields;
@@ -1200,7 +1293,10 @@ static void show_entry(const struct entry *entry)
       break;
     field = &menu_state.fields[input];
 
-    display_entry(input);
+    display_entry(input, trans);
+
+    /* no matter how we were introduced, just flip when updating display */
+    trans = flip;
 
     for (;;) {
       kickthedog();
@@ -1234,7 +1330,7 @@ static void show_menu(const struct entry *menu, int nentries)
     struct entry m;
 
     memcpy_P(&m, menu, sizeof(m));
-    display_str(m.prompt);
+    display_str_trans(m.prompt, scroll_left);
 
     for (;;) {
       kickthedog();
@@ -1249,7 +1345,7 @@ static void show_menu(const struct entry *menu, int nentries)
       }
 
       if (button_sample(BUT_SET)) {
-	show_entry(&m);
+	show_entry(&m, scroll_left);
 	goto out;
       }
 
@@ -1264,31 +1360,31 @@ out:
 static void display_time(void)
 {
   copy_fields(time_fields, NELEM(time_fields));
-  display_entry(-1);
+  display_entry(-1, flip);
 }
 
 // Kinda like display_time but just hours and minutes
-void display_alarm(void)
+void display_alarm(transition_t *trans)
 {
   get_alarm();
-  display_entry(-1);
+  display_entry(-1, trans);
 }
 
 // We can display the current date!
-static void display_date(uint8_t style)
+static void display_date(uint8_t style, transition_t *trans)
 {
   switch (style) {
   case DATE:
     get_date();
-    display_entry(-1);
+    display_entry(-1, trans);
     break;
 
   case DAY:
     copy_fields(dotw_fields, NELEM(dotw_fields));
-    display_entry(-1);
+    display_entry(-1, trans);
     delayms(1000);
     copy_fields(monthdate_fields, NELEM(monthdate_fields));
-    display_entry(-1);
+    display_entry(-1, trans);
     break;
   }
 }
@@ -1436,6 +1532,16 @@ void initbuttons(void) {
   button_change_intr(BUT_ALARM, (ALARM_PIN & _BV(ALARM)));
 }
 
+// When the alarm is going off, pressing a button turns on snooze mode
+// this sets the snoozetimer off in snooze seconds - which turns on
+// the alarm again
+static void setsnooze(void) {
+  snoozetimer = snooze * 60; // convert minutes to seconds
+  DEBUGP("snooze");
+  display_str_trans("snoozing", scroll_left);
+  delayms(1000);
+}
+
 static void ui(void)
 {
   /* recheck alarm switch */
@@ -1444,12 +1550,12 @@ static void ui(void)
   if (timeunknown && (timedate.time.s % 2))
     display_str("        ");
   else {
-    display_time();
-
     if (alarm_on)
       display[0] |= 0x2;
     else 
       display[0] &= ~0x2;
+
+    display_time();
   }
 
   if (alarming && !snoozetimer) {
@@ -1463,7 +1569,7 @@ static void ui(void)
       show_menu(mainmenu, NELEM(mainmenu));
     
     if (button_sample(BUT_SET) || button_sample(BUT_NEXT)) {
-      display_date(DAY);
+      display_date(DAY, scroll_left);
 
       kickthedog();
       delayms(1500);
@@ -1586,10 +1692,10 @@ int main(void) {
   }
 }
 
-static void display_alarm_days(void)
+static void display_alarm_days(transition_t *trans)
 {
   get_alarmdays();
-  display_entry(-1);
+  display_entry(-1, trans);
 }
 
 // This turns on/off the alarm when the switch has been
@@ -1605,15 +1711,15 @@ void setalarmstate(void) {
 
   if (want) {
       // show the status on the VFD tube
-      display_str("alarm on");
+      display_str_trans("alarm on", scroll_left);
       // its not actually SHOW_SNOOZE but just anything but SHOW_TIME
       delayms(1000);
       // show the current alarm time set
       kickthedog();
-      display_alarm();
+      display_alarm(scroll_left);
       delayms(1000);
       kickthedog();
-      display_alarm_days();
+      display_alarm_days(scroll_left);
       delayms(1000);
       // after a second, go back to clock mode
   } else {
@@ -1738,7 +1844,7 @@ static unsigned char __display_str(uint8_t *disp, const char *s)
   return len;
 }
 
-void display_str(const char *s)
+void display_str_trans(const char *s, transition_t *trans)
 {
   uint8_t i, len;
 
@@ -1748,57 +1854,11 @@ void display_str(const char *s)
   len = __display_str(display+1, s);
   for (i = len+1; i < DISPLAYSIZE; i++)
     display[i] = 0;
+
+  flip_display(trans);
 }
 
-/************************* LOW LEVEL DISPLAY ************************/
-
-// Setup SPI
-void vfd_init(void) {
-  SPCR  = _BV(SPE) | _BV(MSTR) | _BV(SPR0);
-}
-
-// This changes and updates the display
-// We use the digit/segment table to determine which
-// pins on the MAX6921 to turn on
-void setdisplay(uint8_t digit, uint8_t segments) {
-  uint32_t d = 0;  // we only need 20 bits but 32 will do
-  uint8_t i;
-
-  // Set the digit selection pin
-  d |= _BV(pgm_read_byte(digittable + digit));
-
-  
-  // Set the individual segments for this digit
-  for (i=0; i<8; i++) {
-    if (segments & _BV(i)) {
-      uint32_t t = 1;
-      t <<= pgm_read_byte(segmenttable + i);
-      d |= t;
-    }
-  }
-
-  // Shift the data out to the display
-  vfd_send(d);
-}
-
-// send raw data to display, its pretty straightforward. Just send 32 bits via SPI
-// the bottom 20 define the segments
-void vfd_send(uint32_t d) {
-  // send lowest 20 bits
-  cli();       // to prevent flicker we turn off interrupts
-  spi_xfer(d >> 16);
-  spi_xfer(d >> 8);
-  spi_xfer(d);
-
-  // latch data
-  VFDLOAD_PORT |= _BV(VFDLOAD);
-  VFDLOAD_PORT &= ~_BV(VFDLOAD);
-  sei();
-}
-
-// Send 1 byte via SPI
-void spi_xfer(uint8_t c) {
-
-  SPDR = c;
-  while (! (SPSR & _BV(SPIF)));
+void display_str(const char *s)
+{
+  display_str_trans(s, flip);
 }

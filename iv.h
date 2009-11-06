@@ -90,10 +90,11 @@ void (*app_start)(void) = 0x0000;
 
 void initbuttons(void);
 void boost_init(void);
-void vfd_init(void);
 void speaker_init(void);
 
+typedef uint8_t (transition_t)(uint8_t *);
 void display_str(const char *s);
+void display_str_trans(const char *s, transition_t *trans);
 
 void set_time(void);
 void set_alarm(void);
@@ -101,17 +102,11 @@ void set_date(void);
 void set_brightness(void);
 void set_volume(void);
 void set_region(void);
-void set_snooze(void); // not activated by default
 
 void beep(uint16_t freq, uint8_t times);
 void tick(void);
 
 void setalarmstate(void);
-
-void setdisplay(uint8_t digit, uint8_t segments);
-void vfd_send(uint32_t d);
-void spi_xfer(uint8_t c);
-
 
 #define BOOST PD6
 #define BOOST_DDR DDRD
@@ -167,3 +162,4 @@ void spi_xfer(uint8_t c);
 #define DIG_9 3
 
 
+#define NELEM(a)	(sizeof(a) / sizeof(*a))
