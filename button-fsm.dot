@@ -1,12 +1,18 @@
+/*
+	Colour key:
+	       red - physical action on switch/button
+	       blue - time-based event
+	       green - software action
+ */
 digraph switch {
-	open -> closed [label="button\npressed"];
+	open -> closed [label="button\npressed", color=red];
 
-	closed -> latched [label="held for\ndebounce\nrept=init"];
-	closed -> open [label="button\nreleased"];
+	closed -> latched [label="held for\ndebounce\nrept=init", color=blue];
+	closed -> open [label="button\nreleased", color=red];
 
-	sampled -> latched [label="button repeat\ntimeout\nrept=rate"];
-	sampled -> open [label="button\nreleased"];
+	sampled -> latched [label="button repeat\ntimeout\nrept=rate", color=blue];
+	sampled -> open [label="button\nreleased", color=red];
 
-	latched -> sampled [label="state\nsampled"];
-	latched -> open [label="button\nreleased"];
+	latched -> sampled [label="state\nsampled", color=green];
+	latched -> open [label="button\nreleased", color=red];
 }
