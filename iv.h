@@ -106,8 +106,6 @@ void set_region(void);
 void beep(uint16_t freq, uint8_t times);
 void tick(void);
 
-void setalarmstate(void);
-
 #define BOOST PD6
 #define BOOST_DDR DDRD
 #define BOOST_PORT PORTD

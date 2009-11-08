@@ -46,6 +46,7 @@ static uint8_t secondmode = SEC_FULL;
 #define barrier()	asm volatile("" : : : "memory")
 
 static unsigned char __display_str(uint8_t *disp, const char *s);
+static uint8_t setalarmstate(void);
 
 struct timedate {
   struct time {
@@ -1477,12 +1478,14 @@ out:
 static void show_menu(const struct entry *menu, int nentries)
 {
   uint8_t entry = 0;
+  transition_t *trans = scroll_up;
 
   while(entry < nentries) {
     struct entry m;
 
     memcpy_P(&m, menu, sizeof(m));
-    display_str_trans(m.prompt, scroll_left);
+    display_str_trans(m.prompt, trans);
+    trans = scroll_left;
 
     for (;;) {
       kickthedog();
@@ -1497,7 +1500,7 @@ static void show_menu(const struct entry *menu, int nentries)
       }
 
       if (button_sample(BUT_SET)) {
-	show_entry(&m, scroll_left);
+	show_entry(&m, scroll_up);
 	goto out;
       }
 
@@ -1509,10 +1512,10 @@ out:
 }
 
 // This displays a time on the clock
-static void display_time(void)
+static void display_time(transition_t *trans)
 {
   copy_fields(time_fields, NELEM(time_fields));
-  display_entry(-1, flip);
+  display_entry(-1, trans);
 }
 
 // Kinda like display_time but just hours and minutes
@@ -1523,20 +1526,20 @@ void display_alarm(transition_t *trans)
 }
 
 // We can display the current date!
-static void display_date(uint8_t style, transition_t *trans)
+static void display_date(uint8_t style)
 {
   switch (style) {
   case DATE:
     get_date();
-    display_entry(-1, trans);
+    display_entry(-1, scroll_up);
     break;
 
   case DAY:
     copy_fields(dotw_fields, NELEM(dotw_fields));
-    display_entry(-1, trans);
+    display_entry(-1, scroll_up);
     delayms(1000);
     copy_fields(monthdate_fields, NELEM(monthdate_fields));
-    display_entry(-1, trans);
+    display_entry(-1, scroll_left);
     break;
   }
 }
@@ -1694,10 +1697,11 @@ static void setsnooze(void) {
   delayms(1000);
 }
 
-static void ui(void)
+static transition_t *ui(transition_t *trans)
 {
   /* recheck alarm switch */
-  setalarmstate();
+  if (setalarmstate())
+    trans = scroll_up;
 
   if (timeunknown && (timedate.time.s % 2))
     display_str("        ");
@@ -1707,7 +1711,8 @@ static void ui(void)
     else 
       display[0] &= ~0x2;
 
-    display_time();
+    display_time(trans);
+    trans = flip;
   }
 
   if (alarming && !snoozetimer) {
@@ -1717,21 +1722,28 @@ static void ui(void)
 	button_sample(BUT_NEXT))
       setsnooze();
   } else {
-    if (button_sample(BUT_MENU))
+    if (button_sample(BUT_MENU)) {
       show_menu(mainmenu, NELEM(mainmenu));
-    
+      trans = scroll_up;
+    }
+
     if (button_sample(BUT_SET) || button_sample(BUT_NEXT)) {
-      display_date(DAY, scroll_left);
+      display_date(DAY);
 
       kickthedog();
       delayms(1500);
+
+      trans = scroll_up;
     } 
   }
+
+  return trans;
 }
 
 int main(void) {
   //  uint8_t i;
   uint8_t mcustate;
+  transition_t *trans;
 
   // turn boost off
   TCCR0B = 0;
@@ -1817,6 +1829,7 @@ int main(void) {
   clock_init();  
 
   DEBUGP("done");
+  trans = flip;
   while (1) {
     kickthedog();
 
@@ -1828,7 +1841,7 @@ int main(void) {
     }
     //DEBUGP(".");
 
-    ui();
+    trans = ui(trans);
 
     /*
      * Sleep until something interesting happens (ie, an interrupt;
@@ -1848,18 +1861,18 @@ static void display_alarm_days(transition_t *trans)
 
 // This turns on/off the alarm when the switch has been
 // set. It also displays the alarm time
-void setalarmstate(void) {
+static uint8_t setalarmstate(void) {
   uint8_t want = button_poll(BUT_ALARM);
 
   if (want == alarm_on)
-    return;
+    return 0;
 
   alarm_on = want;
   snoozetimer = 0;
 
   if (want) {
       // show the status on the VFD tube
-      display_str_trans("alarm on", scroll_left);
+      display_str_trans("alarm on", scroll_up);
       // its not actually SHOW_SNOOZE but just anything but SHOW_TIME
       delayms(1000);
       // show the current alarm time set
@@ -1870,6 +1883,7 @@ void setalarmstate(void) {
       display_alarm_days(scroll_left);
       delayms(1000);
       // after a second, go back to clock mode
+      return 1;
   } else {
     if (alarming) {
       // if the alarm is going off, we should turn it off
@@ -1884,6 +1898,7 @@ void setalarmstate(void) {
       PORTB |= _BV(SPK1) | _BV(SPK2);
     } 
   }
+  return 0;
 }
 
 /**************************** SPEAKER *****************************/
