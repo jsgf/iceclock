@@ -395,6 +395,129 @@ static void setdisplay(uint8_t digit, uint8_t segments) {
   vfd_send(d);
 }
 
+/* 
+ *  -A-
+ * |   |
+ * F   B
+ * |   |
+ *  -G-
+ * |   |
+ * E   C
+ * |   |
+ *  -D-   oH
+ */
+#define D0A	(7)
+#define D0B	(6)
+#define D0C	(5)
+#define D0D	(4)
+#define D0E	(3)
+#define D0F	(2)
+#define D0G	(1)
+#define D0H	(0)
+
+#define D1A	(D0A + 8)
+#define D1B	(D0B + 8)
+#define D1C	(D0C + 8)
+#define D1D	(D0D + 8)
+#define D1E	(D0E + 8)
+#define D1F	(D0F + 8)
+#define D1G	(D0G + 8)
+#define D1H	(D0H + 8)
+
+/*
+ * Given a pair of 7-segment digits, return a new digit generating by
+ * combining them accorting to 'table'.  Each entry in 'table'
+ * dictates where the corresponding output segment will be taken from.
+ *
+ * Table is in A-H order, even those that's reversed with respect to
+ * their bit ordering.
+ */
+static uint8_t digit_transformer(uint8_t d0, uint8_t d1, const uint8_t *table)
+{
+  uint16_t in = (d1 << 8) | d0;
+  uint8_t out;
+  signed char i;
+  
+  out = 0;
+  for (i = 7; i >= 0; i--) {
+    out >>= 1;
+    out |= 0x80 & -!!(in & (1 << pgm_read_byte(table + i)));
+  }
+
+  return out;
+}
+
+static uint8_t scroll_up_top(uint8_t top, uint8_t bottom)
+{
+  /*
+   * We need to store the bottom's B and F segments somewhere
+   * temporarily to keep them in phase with 0A -> 1D, so store them in
+   * the decimal points...
+   */
+#define X D0H
+#define Y D1H
+
+  static const uint8_t up[] PROGMEM = {
+    D0G,	/* A */
+    D0C,	/* B */
+    Y,		/* C */
+    D1A,	/* D */
+    X,		/* E */
+    D0E,	/* F */
+    D0D,	/* G */
+    D1F,	/* H */
+  };
+  return digit_transformer(top, bottom, up);
+}
+
+static uint8_t scroll_up_bottom(uint8_t bottom)
+{
+  static const uint8_t up[] PROGMEM = {
+    D0G,	/* A */
+    D0C,	/* B */
+    D1B,	/* C */
+    D1A,	/* D */
+    D1F,	/* E */
+    D0E,	/* F */
+    D0D,	/* G */
+    D0B,	/* H */
+  };
+  return digit_transformer(bottom, 0, up);
+}
+
+static uint8_t scroll_up(uint8_t *statep)
+{
+  unsigned char s = *statep;
+  unsigned char i;
+
+  if (s >= 3*2)
+    return 0;
+
+  if (s == 0) {
+    output_display[0] = display[0];
+    for(i = 1; i < DISPLAYSIZE; i++) {
+      output_display[i] &= ~1;
+      display[i] &= ~1;
+    }
+  }
+
+  for(i = 1; i < DISPLAYSIZE; i++) {
+    uint8_t top = output_display[i];
+    uint8_t bot = 0;
+
+    if (s >= 3) {
+      bot = display[i];
+      display[i] = scroll_up_bottom(bot);
+    }
+
+    output_display[i] = scroll_up_top(top, bot);
+  }
+  
+  *statep = ++s;
+  
+  return 1000/20;
+}
+
 static uint8_t scroll_left(uint8_t *statep)
 {
   uint8_t s = *statep;
