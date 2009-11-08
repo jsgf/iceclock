@@ -46,6 +46,7 @@ static uint8_t secondmode = SEC_FULL;
 #define barrier()	asm volatile("" : : : "memory")
 
 static unsigned char __display_str(uint8_t *disp, const char *s);
+static uint8_t setalarmstate(void);
 
 struct timedate {
   struct time {
@@ -389,6 +390,138 @@ static void setdisplay(uint8_t digit, uint8_t segments) {
 
   // Shift the data out to the display
   vfd_send(d);
+}
+
+/* 
+ *  -A-
+ * |   |
+ * F   B
+ * |   |
+ *  -G-
+ * |   |
+ * E   C
+ * |   |
+ *  -D-   oH
+ */
+#define D0A	(7)
+#define D0B	(6)
+#define D0C	(5)
+#define D0D	(4)
+#define D0E	(3)
+#define D0F	(2)
+#define D0G	(1)
+#define D0H	(0)
+
+#define D1A	(D0A + 8)
+#define D1B	(D0B + 8)
+#define D1C	(D0C + 8)
+#define D1D	(D0D + 8)
+#define D1E	(D0E + 8)
+#define D1F	(D0F + 8)
+#define D1G	(D0G + 8)
+#define D1H	(D0H + 8)
+
+/*
+ * Given a pair of 7-segment digits, return a new digit generating by
+ * combining them accorting to 'table'.  Each entry in 'table'
+ * dictates where the corresponding output segment will be taken from.
+ *
+ * Table is in A-H order, even those that's reversed with respect to
+ * their bit ordering.
+ */
+static uint8_t digit_transformer(uint8_t d0, uint8_t d1, const uint8_t *table)
+{
+  uint16_t in = (d1 << 8) | d0;
+  uint8_t out;
+  signed char i;
+  
+  out = 0;
+  for (i = 7; i >= 0; i--) {
+    out >>= 1;
+    out |= 0x80 & -!!(in & (1 << pgm_read_byte(table + i)));
+  }
+
+  return out;
+}
+
+static uint8_t scroll_up_top(uint8_t top, uint8_t mid)
+{
+  static const uint8_t up[] PROGMEM = {
+    D0G,	/* A */
+    D0C,	/* B */
+    D1B,	/* C */
+    D1A,	/* D */
+    D1F,	/* E */
+    D0E,	/* F */
+    D0D,	/* G */
+    D1H,	/* H */
+  };
+  return digit_transformer(top, mid, up);
+}
+
+static uint8_t scroll_up_mid(uint8_t mid, uint8_t bottom)
+{
+  static const uint8_t up[] PROGMEM = {
+    D1A,	/* - */
+    D0C,	/* Y */
+    D1B,	/* - */
+    D0D,	/* - */
+    D1F,	/* - */
+    D0E,	/* X */
+    D0G,	/* G */
+    D1H,	/* H */
+  };
+  return digit_transformer(mid, bottom, up);
+}
+
+static uint8_t scroll_up_bottom(uint8_t bottom)
+{
+  static const uint8_t up[] PROGMEM = {
+    D0G,	/* A */
+    D0C,	/* B */
+    D1B,	/* C */
+    D1A,	/* D */
+    D1F,	/* E */
+    D0E,	/* F */
+    D0D,	/* G */
+    D0H,	/* H */
+  };
+  return digit_transformer(bottom, 0, up);
+}
+
+static uint8_t scroll_up(uint8_t *statep)
+{
+  unsigned char s = *statep;
+  unsigned char i;
+  static uint8_t mid[DISPLAYSIZE];
+
+  if (s >= 4+3)
+    return 0;
+
+  if (s == 0) {
+    output_display[0] = display[0];
+    for(i = 1; i < DISPLAYSIZE; i++)
+      mid[i] = 0;
+  }
+
+  for(i = 1; i < DISPLAYSIZE; i++) {
+    uint8_t top = output_display[i];
+    uint8_t m = 0;
+
+    if (s >= 3) {
+      uint8_t bot;
+      bot = display[i];
+      m = mid[i];
+      mid[i] = scroll_up_mid(m, bot);
+      display[i] = scroll_up_bottom(bot);
+    }
+
+    output_display[i] = scroll_up_top(top, m);
+  }
+  
+  *statep = ++s;
+  
+  return 1000/30;
 }
 
 static uint8_t scroll_left(uint8_t *statep)
@@ -1325,12 +1458,14 @@ out:
 static void show_menu(const struct entry *menu, int nentries)
 {
   uint8_t entry = 0;
+  transition_t *trans = scroll_up;
 
   while(entry < nentries) {
     struct entry m;
 
     memcpy_P(&m, menu, sizeof(m));
-    display_str_trans(m.prompt, scroll_left);
+    display_str_trans(m.prompt, trans);
+    trans = scroll_left;
 
     for (;;) {
       kickthedog();
@@ -1345,7 +1480,7 @@ static void show_menu(const struct entry *menu, int nentries)
       }
 
       if (button_sample(BUT_SET)) {
-	show_entry(&m, scroll_left);
+	show_entry(&m, scroll_up);
 	goto out;
       }
 
@@ -1357,10 +1492,10 @@ out:
 }
 
 // This displays a time on the clock
-static void display_time(void)
+static void display_time(transition_t *trans)
 {
   copy_fields(time_fields, NELEM(time_fields));
-  display_entry(-1, flip);
+  display_entry(-1, trans);
 }
 
 // Kinda like display_time but just hours and minutes
@@ -1371,20 +1506,20 @@ void display_alarm(transition_t *trans)
 }
 
 // We can display the current date!
-static void display_date(uint8_t style, transition_t *trans)
+static void display_date(uint8_t style)
 {
   switch (style) {
   case DATE:
     get_date();
-    display_entry(-1, trans);
+    display_entry(-1, scroll_up);
     break;
 
   case DAY:
     copy_fields(dotw_fields, NELEM(dotw_fields));
-    display_entry(-1, trans);
+    display_entry(-1, scroll_up);
     delayms(1000);
     copy_fields(monthdate_fields, NELEM(monthdate_fields));
-    display_entry(-1, trans);
+    display_entry(-1, scroll_left);
     break;
   }
 }
@@ -1542,10 +1677,11 @@ static void setsnooze(void) {
   delayms(1000);
 }
 
-static void ui(void)
+static transition_t *ui(transition_t *trans)
 {
   /* recheck alarm switch */
-  setalarmstate();
+  if (setalarmstate())
+    trans = scroll_up;
 
   if (timeunknown && (timedate.time.s % 2))
     display_str("        ");
@@ -1555,7 +1691,8 @@ static void ui(void)
     else 
       display[0] &= ~0x2;
 
-    display_time();
+    display_time(trans);
+    trans = flip;
   }
 
   if (alarming && !snoozetimer) {
@@ -1565,21 +1702,28 @@ static void ui(void)
 	button_sample(BUT_NEXT))
       setsnooze();
   } else {
-    if (button_sample(BUT_MENU))
+    if (button_sample(BUT_MENU)) {
       show_menu(mainmenu, NELEM(mainmenu));
-    
+      trans = scroll_up;
+    }
+
     if (button_sample(BUT_SET) || button_sample(BUT_NEXT)) {
-      display_date(DAY, scroll_left);
+      display_date(DAY);
 
       kickthedog();
       delayms(1500);
+
+      trans = scroll_up;
     } 
   }
+
+  return trans;
 }
 
 int main(void) {
   //  uint8_t i;
   uint8_t mcustate;
+  transition_t *trans;
 
   // turn boost off
   TCCR0B = 0;
@@ -1669,6 +1813,7 @@ int main(void) {
   clock_init();  
 
   DEBUGP("done");
+  trans = flip;
   while (1) {
     kickthedog();
 
@@ -1680,7 +1825,7 @@ int main(void) {
     }
     //DEBUGP(".");
 
-    ui();
+    trans = ui(trans);
 
     /*
      * Sleep until something interesting happens (ie, an interrupt;
@@ -1700,18 +1845,18 @@ static void display_alarm_days(transition_t *trans)
 
 // This turns on/off the alarm when the switch has been
 // set. It also displays the alarm time
-void setalarmstate(void) {
+static uint8_t setalarmstate(void) {
   uint8_t want = button_poll(BUT_ALARM);
 
   if (want == alarm_on)
-    return;
+    return 0;
 
   alarm_on = want;
   snoozetimer = 0;
 
   if (want) {
       // show the status on the VFD tube
-      display_str_trans("alarm on", scroll_left);
+      display_str_trans("alarm on", scroll_up);
       // its not actually SHOW_SNOOZE but just anything but SHOW_TIME
       delayms(1000);
       // show the current alarm time set
@@ -1722,6 +1867,7 @@ void setalarmstate(void) {
       display_alarm_days(scroll_left);
       delayms(1000);
       // after a second, go back to clock mode
+      return 1;
   } else {
     if (alarming) {
       // if the alarm is going off, we should turn it off
@@ -1736,6 +1882,7 @@ void setalarmstate(void) {
       PORTB |= _BV(SPK1) | _BV(SPK2);
     } 
   }
+  return 0;
 }
 
 /**************************** SPEAKER *****************************/
