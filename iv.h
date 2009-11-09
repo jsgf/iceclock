@@ -27,10 +27,14 @@ THE SOFTWARE.
 #define DEBUG 1
 #define DEBUGP(x)  if (DEBUG) {putstring_nl(x);}
 
+#define BRITE_AUTO	0	/* auto-set brightness from sensor */
 #define BRITE_MIN	30
 #define BRITE_MAX	90
 #define BRITE_STEP	5
 
+#define PHOTOCELL_DARK 1010
+#define PHOTOCELL_LIGHT 500
+ 
 #define REGION_US 0
 #define REGION_EU 1
 
@@ -139,6 +143,13 @@ void tick(void);
 #define SPK2 PB2
 #define SPK_PORT PORTB
 #define SPK_DDR DDRB
+
+#define SENSOR_POWER_PORT PORTC
+#define SENSOR_POWER_DDR DDRC
+#define SENSOR_POWER_PIN PC5
+#define SENSOR_SENSE_PULLUP PC4
+#define SENSOR_SENSE_PIN MUX2
+#define SENSOR_SENSE_PIND ADC4D
 
 #define SEG_A 19
 #define SEG_B 17

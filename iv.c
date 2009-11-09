@@ -73,6 +73,8 @@ static uint8_t alarm_days = DAYS_ALL;
 static uint8_t morning, evening;
 static uint8_t daybrite, nightbrite;
 
+static uint8_t lightsensor;	/* non-zero if present */
+
 // are we in low power sleep mode?
 volatile uint8_t sleepmode = 0;
 
@@ -337,6 +339,145 @@ static uint8_t button_sample(uint8_t button)
     sei();
 
   return ret;
+}
+
+/**************************** LIGHT SENSOR *****************************/
+static void sensor_shutdown(void)
+{
+  lightsensor = 0;			       /* not usable */
+  ADCSRA = 0;				       /* disable ADC */
+  SENSOR_POWER_PORT &= ~_BV(SENSOR_POWER_PIN); /* power down sensor */
+  PRR |= _BV(PRADC);			       /* power off ADC */
+}
+
+static uint16_t sensor_read(void)
+{
+  uint8_t low, high;
+
+  low = ADCL;
+  high = ADCH;
+
+  return (high << 8) | low;
+}
+
+static void sensor_trigger(void)
+{
+  ADCSRA |= _BV(ADSC);
+}
+
+static uint16_t sensor_poll(void)
+{
+  sensor_trigger();
+  while (ADCSRA & _BV(ADSC))
+    ;
+
+  return sensor_read();
+}
+  
+static void sensor_init(void)
+{
+  uint16_t val;
+
+  SENSOR_POWER_DDR |= _BV(SENSOR_POWER_PIN);
+  
+  PRR &= ~_BV(PRADC);			// power on ADC
+  ADCSRA = (_BV(ADPS2)| _BV(ADPS1) |	// Set ADC prescalar to 64 - 125KHz sample rate @ 8MHz F_CPU
+	    _BV(ADEN));  // Enable ADC
+  ADMUX = (_BV(REFS0) |			// Set ADC reference to AVCC
+	   _BV(SENSOR_SENSE_PIN));	// Set ADC input as ADC4 (PC4)
+  DIDR0 |= _BV(SENSOR_SENSE_PIND);	// Disable the digital input buffer on the sense pin to save ower.
+
+  /*
+   * Autodetect sensor mod.
+   *
+   * Set the pullup on the sensor ADC input and the power pin to 0.
+   * If we read close to full VCC (the reference), then there's no
+   * pulldown resistor on the pin, and so nothing installed.  If
+   * there's some pulldown then there's a resistor there.
+   */
+  SENSOR_POWER_PORT |= _BV(SENSOR_SENSE_PULLUP);
+  SENSOR_POWER_PORT &= ~_BV(SENSOR_POWER_PIN);
+
+  val = sensor_poll();
+
+  /* Use 90% VCC as the threshold */
+  if (val > (uint16_t)(.9 * (1 << 10))) {
+    sensor_shutdown();
+  } else {
+    /* Sensor mod appears to exist */
+    ADCSRA |= _BV(ADIE);  /* Enable ADC interrupt */
+
+    /* Turn off pullup and enable power */
+    SENSOR_POWER_PORT &= ~_BV(SENSOR_SENSE_PULLUP);
+    SENSOR_POWER_PORT |= _BV(SENSOR_POWER_PIN);
+
+    lightsensor = 1;
+  }
+}
+
+static uint8_t clamp_brite(uint8_t b)
+{
+  if (b != BRITE_AUTO) {
+    if (b < BRITE_MIN)
+      b = BRITE_MIN;
+    else if (b > BRITE_MAX)
+      b = BRITE_MAX;
+  }
+
+  return b;
+}
+
+static void __set_brite(uint8_t b)
+{
+  b = clamp_brite(b);
+
+  if (b == BRITE_AUTO) {
+    if (lightsensor) {
+      sensor_trigger();		/* update from ADC interrupt */
+      return;
+    } else
+      b = (BRITE_MIN + BRITE_MAX) / 2; /* middling */
+  }
+
+  OCR0A = b;
+}
+
+static uint8_t get_brite(void)
+{
+  uint8_t b;
+
+  if (alarming)
+    b = (timedate.time.s % 2) ? BRITE_MIN : BRITE_MAX;
+  else {
+    uint8_t hour = timedate.time.h;
+
+    b = nightbrite;
+    if (hour >= morning && hour < evening)
+      b = daybrite;
+  }
+
+  return b;
+}
+
+static void set_brite(void)
+{
+  __set_brite(get_brite());
+}
+
+// Update brightness once ADC measurement completes
+SIGNAL(SIG_ADC) {
+  uint16_t light = sensor_read();
+  uint8_t b;
+
+  if (light > PHOTOCELL_DARK)
+    b = BRITE_MIN;
+  else if (light < PHOTOCELL_LIGHT)
+    b = BRITE_MAX;
+  else
+    b = BRITE_MAX - (((unsigned long)(BRITE_MAX - BRITE_MIN)) *
+		     (light - PHOTOCELL_LIGHT)) / (PHOTOCELL_DARK - PHOTOCELL_LIGHT);
+
+  __set_brite(b);
 }
 
 /************************* LOW LEVEL DISPLAY ************************/
@@ -714,12 +855,10 @@ static void load_brite(void)
     evening = 18;
 
   daybrite = eeprom_read_byte((unsigned char *)EE_DAYBRITE);
-  if (daybrite < BRITE_MIN || daybrite > BRITE_MAX)
-    daybrite = BRITE_MAX;
+  daybrite = clamp_brite(daybrite);
 
   nightbrite = eeprom_read_byte((unsigned char *)EE_NIGHTBRITE);
-  if (nightbrite < BRITE_MIN || nightbrite > BRITE_MAX)
-    nightbrite = BRITE_MIN;
+  nightbrite = clamp_brite(nightbrite);
 }
 
 static void save_brite(void)
@@ -728,32 +867,6 @@ static void save_brite(void)
   eeprom_write_byte((unsigned char *)EE_EVENINGHR, evening);
   eeprom_write_byte((unsigned char *)EE_DAYBRITE, daybrite);
   eeprom_write_byte((unsigned char *)EE_NIGHTBRITE, nightbrite);
-}
-
-static uint8_t get_brite(void)
-{
-  uint8_t b;
-
-  if (alarming)
-    b = (timedate.time.s % 2) ? BRITE_MIN : BRITE_MAX;
-  else {
-    uint8_t hour = timedate.time.h;
-
-    b = nightbrite;
-    if (hour >= morning && hour < evening)
-      b = daybrite;
-  }
-
-  /* safety */
-  if (b < BRITE_MIN || b > BRITE_MAX)
-    b = BRITE_MIN;
-
-  return b;
-}
-
-static void set_brite(void)
-{
-  OCR0A = get_brite();
 }
 
 /*
@@ -1063,14 +1176,28 @@ static void update_brite(unsigned char *v)
   unsigned char new = *v;
 
   new += BRITE_STEP;
-  if (new < BRITE_MIN)
+  if (new == BRITE_AUTO)
     new = BRITE_MIN;
-  if (new > BRITE_MAX)
+  else if (new < BRITE_MIN)
     new = BRITE_MIN;
+  else if (new > BRITE_MAX) {
+    if (lightsensor)
+      new = BRITE_AUTO;
+    else
+      new = BRITE_MIN;
+  }
 
-  OCR0A = new;
+  __set_brite(new);
 
   *v = new;
+}
+
+static uint8_t show_brite(unsigned char pos, unsigned char *v)
+{
+  if (*v == BRITE_AUTO)
+    return show_str(pos, PSTR("au"));
+  else
+    return show_num_slz(pos, v);
 }
 
 static unsigned char show_vol(unsigned char pos, unsigned char *v)
@@ -1207,7 +1334,7 @@ static const struct field day_fields[] PROGMEM = {
   { show_str, NULL, day_P },
   { show_hour, update_morning, &morning },
   SPACE,
-  { show_num, update_brite, &daybrite },
+  { show_brite, update_brite, &daybrite },
 };
 
 static void update_evening(unsigned char *v)
@@ -1593,7 +1720,8 @@ void gotosleep(void) {
   DDRB &= ~_BV(BUTTON2);
   ALARM_PORT &= ~_BV(ALARM);
   ALARM_DDR &= ~_BV(ALARM);
-  
+
+  sensor_shutdown();  
 
   // reduce the clock speed
   CLKPR = _BV(CLKPCE);
@@ -1652,7 +1780,7 @@ static void wakeup(void) {
 void initbuttons(void) {
   DDRB =  _BV(VFDCLK) | _BV(VFDDATA) | _BV(SPK1) | _BV(SPK2);
   DDRD = _BV(BOOST) | _BV(VFDSWITCH);
-  DDRC = _BV(VFDLOAD) | _BV(VFDBLANK) | _BV(4);
+  DDRC = _BV(VFDLOAD) | _BV(VFDBLANK);
   PORTD = _BV(BUTTON1) | _BV(BUTTON3) | _BV(ALARM);
   PORTB = _BV(BUTTON2);
 
@@ -1786,6 +1914,8 @@ int main(void) {
 
     DEBUGP("vfd init");
     vfd_init();
+
+    sensor_init();
     
     DEBUGP("boost init");
     boost_init();
@@ -1814,6 +1944,13 @@ int main(void) {
 
   DEBUGP("done");
   trans = flip;
+
+  if (lightsensor) {
+    trans = scroll_up;
+    display_str_trans("sensor", trans);
+    delayms(1000);
+  }
+
   while (1) {
     kickthedog();
 
