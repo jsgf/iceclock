@@ -37,6 +37,10 @@ THE SOFTWARE.
 
 static uint8_t region = REGION_US;
 static uint8_t secondmode = SEC_FULL;
+
+/* Drift correction applied each hour */
+static int8_t drift = 0;
+
 /*
  * Barrier to force compiler to make sure memory is up-to-date.  This
  * is preferable to using "volatile" because we can just resync with
@@ -761,7 +765,7 @@ static void set_brite(void)
  * crystal.  It leaves interrupts disabled so it can never itself be
  * interrupted.
  */
-SIGNAL (TIMER2_OVF_vect) {
+SIGNAL (TIMER2_COMPA_vect) {
   struct timedate td;
   CLKPR = _BV(CLKPCE);  //MEME
   CLKPR = 0;
@@ -770,6 +774,13 @@ SIGNAL (TIMER2_OVF_vect) {
 
   if (!suspend_update) {
     increment_time(&td);
+
+    /* Apply drift correction on the first second of each hour */
+    if (td.time.m == 0 && td.time.s == 0)
+      OCR2A = 128 + drift;
+    else
+      OCR2A = 128;
+
     timedate = td;
   }
 
@@ -1246,6 +1257,34 @@ static const struct field snooze_fields[] PROGMEM = {
   { show_num_slz, update_mod60_s5, &snooze },
 };
 
+static uint8_t show_drift(uint8_t pos, unsigned char *v)
+{
+  int8_t d = *v;
+  
+  show_str(pos++, d < 0 ? dash_P : space_P);
+  if (d < 0)
+    d = -d;
+  emit_number(display+pos, d);
+
+  return 3;
+}
+
+static void update_drift(unsigned char *v)
+{
+  int8_t d = *v;
+
+  if (++d > DRIFT_MAX)
+    d = DRIFT_MIN;
+
+  *v = d;
+}
+
+static unsigned char drift_P[] PROGMEM = "drft ";
+static const struct field drift_fields[] PROGMEM = {
+  { show_str, NULL, drift_P },
+  { show_drift, update_drift, (unsigned char *)&drift },
+};
+
 static void copy_fields(const struct field PROGMEM *fields, unsigned int nelem)
 {
   memcpy_P(menu_state.fields, fields, nelem * sizeof(struct field));
@@ -1360,6 +1399,16 @@ static void store_snooze(void)
   eeprom_write_byte((uint8_t *)EE_SNOOZE, snooze);
 }
 
+static void get_drift(void)
+{
+  copy_fields(drift_fields, NELEM(drift_fields));
+}
+
+static void store_drift(void)
+{
+  eeprom_write_byte((uint8_t *)EE_DRIFT, drift);
+}
+
 static const struct entry mainmenu[] PROGMEM = {
   { "set alarm", get_alarm, store_alarm },
   { "alrm day", get_alarmdays, store_alarm },
@@ -1371,6 +1420,7 @@ static const struct entry mainmenu[] PROGMEM = {
   { "set vol", get_vol, store_vol },
   { "set regn", get_region, store_region },
   { "set secs", get_secmode, store_secmode },
+  { "set drft", get_drift, store_drift },
 };
 
 static void display_entry(char highlight, transition_t *trans)
@@ -1526,6 +1576,12 @@ static void display_date(uint8_t style)
 
 /**************************** RTC & ALARM *****************************/
 static void clock_init(void) {
+  drift = eeprom_read_byte((uint8_t *)EE_HOUR);
+  if (drift > DRIFT_MAX || drift < -DRIFT_MIN) {
+    drift = 0;
+    eeprom_write_byte((uint8_t *)EE_DRIFT, drift);
+  }
+
   // we store the time in EEPROM when switching from power modes so its
   // reasonable to start with whats in memory
   timedate.time.h = eeprom_read_byte((uint8_t *)EE_HOUR) % 24;
@@ -1551,14 +1607,28 @@ static void clock_init(void) {
 
   restored = 1;
 
+  /* 
+   * Input is a (nominal) 32khz crystal.  Set:
+   * - divider to 256
+   * - mode to CTC
+   * - comparitor to 128
+   *
+   * This will increment the counter at (nominally) 128Hz.  When it
+   * compares to OCR2A it will reset the counter to 0 and raise an
+   * interrupt so we can increment seconds.
+   *
+   * To correct drift we can adjust the comparitor to 128 +/-
+   * correction.
+   */
   // Turn on the RTC by selecting the external 32khz crystal
-  // 32.768 / 128 = 256 which is exactly an 8-bit timer overflow
   ASSR |= _BV(AS2); // use crystal
-  TCCR2B = _BV(CS22) | _BV(CS20); // div by 128
-  // We will overflow once a second, and call an interrupt
+
+  OCR2A = 128;			/* +/- drift correction */
+  TCCR2A = _BV(WGM21);
+  TCCR2B = _BV(WGM22) | _BV(CS22) | _BV(CS21);
 
   // enable interrupt
-  TIMSK2 = _BV(TOIE2);
+  TIMSK2 = _BV(OCIE1A);
 
   // enable all interrupts!
   sei();

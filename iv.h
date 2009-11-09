@@ -83,6 +83,10 @@ THE SOFTWARE.
 #define EE_EVENINGHR 15
 #define EE_DAYBRITE 16
 #define EE_NIGHTBRITE 17
+#define EE_DRIFT 18
+
+#define DRIFT_MIN	(-64)
+#define DRIFT_MAX	(64)
 
 void delay(uint16_t delay);
 
