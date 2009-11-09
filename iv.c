@@ -1575,7 +1575,7 @@ static void display_date(uint8_t style)
 }
 
 /**************************** RTC & ALARM *****************************/
-static void clock_init(void) {
+static void clock_init(uint8_t inittimer) {
   drift = eeprom_read_byte((uint8_t *)EE_HOUR);
   if (drift > DRIFT_MAX || drift < -DRIFT_MIN) {
     drift = 0;
@@ -1607,28 +1607,35 @@ static void clock_init(void) {
 
   restored = 1;
 
-  /* 
-   * Input is a (nominal) 32khz crystal.  Set:
-   * - divider to 256
-   * - mode to CTC
-   * - comparitor to 128
-   *
-   * This will increment the counter at (nominally) 128Hz.  When it
-   * compares to OCR2A it will reset the counter to 0 and raise an
-   * interrupt so we can increment seconds.
-   *
-   * To correct drift we can adjust the comparitor to 128 +/-
-   * correction.
+  /*
+   * Only init timer if necessary (real hardware reset) otherwise we
+   * may glitch a second.
    */
-  // Turn on the RTC by selecting the external 32khz crystal
-  ASSR |= _BV(AS2); // use crystal
+  if (inittimer) {
+    /* 
+     * Input is a (nominal) 32khz crystal.  Set:
+     * - divider to 256
+     * - mode to CTC
+     * - comparitor to 128
+     *
+     * This will increment the counter at (nominally) 128Hz.  When it
+     * compares to OCR2A it will reset the counter to 0 and raise an
+     * interrupt so we can increment seconds.
+     *
+     * To correct drift we can adjust the comparitor to 128 +/-
+     * correction.
+     */
+    // Turn on the RTC by selecting the external 32khz crystal
+    ASSR |= _BV(AS2); // use crystal
 
-  OCR2A = 128;			/* +/- drift correction */
-  TCCR2A = _BV(WGM21);
-  TCCR2B = _BV(WGM22) | _BV(CS22) | _BV(CS21);
+    TCNT2 = 0;
+    OCR2A = 128;			/* +/- drift correction */
+    TCCR2A = _BV(WGM21);
+    TCCR2B = _BV(WGM22) | _BV(CS22) | _BV(CS21);
 
-  // enable interrupt
-  TIMSK2 = _BV(OCIE1A);
+    // enable interrupt
+    TIMSK2 = _BV(OCIE1A);
+  }
 
   // enable all interrupts!
   sei();
@@ -1880,8 +1887,8 @@ int main(void) {
   SMCR = _BV(SE); // idle mode
   
   DEBUGP("clock init");
-  clock_init();  
-
+  clock_init(timeunknown);
+    
   DEBUGP("done");
   trans = flip;
   while (1) {
