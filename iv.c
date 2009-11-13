@@ -52,17 +52,17 @@ static int8_t drift = 0;
 static unsigned char __display_str(uint8_t *disp, const char *s);
 static uint8_t setalarmstate(void);
 
-struct timedate {
-  struct time {
-    uint8_t s, m, h;
-  } time;
-  struct date {
-    uint8_t m, d, y;
-  } date;
+struct time {
+  uint8_t s, m, h;
+};
+struct date {
+  uint8_t m, d, y, dow;
 };
 
-// These variables store the current time and date.
-struct timedate timedate;
+typedef uint32_t time_t;
+
+// Seconds since Epoch (1 Jan 2000 00:00 localtime)
+static time_t epochtime;
 static volatile uint8_t suspend_update; /* if set, don't update */
 
 // how loud is the speaker supposed to be?
@@ -117,6 +117,188 @@ uint16_t alarmdiv = 0;
 // How long we have been snoozing
 static uint8_t snooze = MAXSNOOZE / 60;
 static uint16_t snoozetimer = 0;
+
+/******************* TIME/DATE FUNCTIONS ***********************/
+
+#define EPOCH		2000
+#define SECS_PER_DAY	(60ul*60*24)
+
+static time_t time(void)
+{
+  time_t ret;
+
+  do {
+    ret = epochtime;
+    barrier();
+  } while (ret != epochtime);
+
+  return ret;
+}
+
+// This will calculate leapyears, give it the year
+// and it will return 1 (true) or 0 (false)
+static uint8_t leapyear(uint16_t y)
+{
+  return ( (!(y % 4) && (y % 100)) || !(y % 400));
+}
+
+static uint16_t yearlen(uint16_t y)
+{
+  return 365 + leapyear(y);
+}
+
+static uint16_t monthlen(uint8_t month, uint16_t year)
+{
+  switch (month) {
+  case 4:
+  case 6:
+  case 9:
+  case 11:
+    return 30;
+
+  case 2:
+    return 28 + leapyear(year);
+
+  default:
+    return 31;
+  }
+}
+
+static void get_timeofday(time_t et, struct time *time)
+{
+  time_t daysecs = et % SECS_PER_DAY;
+
+  time->s = daysecs % 60;
+  time->m = (daysecs % 3600) / 60;
+  time->h = daysecs / 3600;
+}
+
+static uint8_t dotw(time_t et)
+{
+  return (et / SECS_PER_DAY) % 7;
+}
+
+static void get_caldate(time_t et, struct date *date)
+{
+  time_t days = et / SECS_PER_DAY;
+  uint16_t year = EPOCH;
+  uint8_t month;
+
+  date->dow = days % 7;		/* day 0 = 1/1/2000 was Saturday */
+  while (days >= yearlen(year)) {
+    days -= yearlen(year);
+    year++;
+  }
+
+  date->y = year - EPOCH;
+  month = 1;
+  while (days >= monthlen(month, year)) {
+    days -= monthlen(month, year);
+    month++;
+  }
+
+  date->m = month;
+  date->d = days + 1;
+}
+
+static time_t make_epochtime(const struct date *d,
+			     const struct time *t)
+{
+  time_t ret = 0;
+  uint8_t i;
+
+  for (i = 0; i < d->y; i++)
+    ret += yearlen(i + EPOCH);
+
+  for (i = 1; i < d->m; i++)
+    ret += monthlen(i, d->y + EPOCH) * SECS_PER_DAY;
+
+  ret += (d->d - 1) * SECS_PER_DAY;
+  ret += t->h * 3600 + t->m * 60 + t->s;
+
+  return ret;
+}
+
+static void eeprom_restore_timedate(void)
+{
+  struct date d;
+  struct time t;
+
+  d.y = eeprom_read_byte((uint8_t *)EE_YEAR);
+  d.m = eeprom_read_byte((uint8_t *)EE_MONTH);
+  d.d = eeprom_read_byte((uint8_t *)EE_DAY);
+
+  t.h = eeprom_read_byte((uint8_t *)EE_HOUR);
+  t.m = eeprom_read_byte((uint8_t *)EE_MIN);
+  t.s = eeprom_read_byte((uint8_t *)EE_SEC);
+
+  epochtime = make_epochtime(&d, &t);
+}
+
+static void eeprom_save_date(void)
+{
+  struct date d;
+
+  get_caldate(time(), &d);
+
+  eeprom_write_byte((uint8_t *)EE_YEAR, d.y);
+  eeprom_write_byte((uint8_t *)EE_MONTH, d.m);
+  eeprom_write_byte((uint8_t *)EE_DAY, d.d);
+}
+
+static void eeprom_save_time(void)
+{
+  struct time t;
+
+  get_timeofday(time(), &t);
+
+  eeprom_write_byte((uint8_t *)EE_HOUR, t.h);
+  eeprom_write_byte((uint8_t *)EE_MIN, t.m);
+  eeprom_write_byte((uint8_t *)EE_SEC, t.s);
+}
+
+static const char *dayofweek(const struct date *date)
+{
+#define DOW(dow)	static const char dow[] PROGMEM = #dow
+  DOW(saturday);
+  DOW(sunday);
+  DOW(monday);
+  DOW(tuesday);
+  DOW(wednsday);
+  DOW(thursday);
+  DOW(friday);
+#undef DOW
+  static const char *days[] = {
+    saturday, sunday, monday, tuesday, wednsday, thursday, friday,
+  };
+
+  return days[date->dow];
+}
+
+static const char *monthname(uint8_t month)
+{
+#define MON(m)	static const char m[] PROGMEM = #m
+  MON(jan);
+  MON(feb);
+  MON(march);
+  MON(april);
+  MON(may);
+  MON(june);
+  MON(july);
+  MON(augst);
+  MON(sept);
+  MON(octob);
+  MON(novem);
+  MON(decem);
+#undef MON
+  static const char *months[] = {
+    jan, feb, march, april, may, june,
+    july, augst, sept, octob, novem, decem
+  };
+
+  return months[month-1];
+}
+
 
 /* 
  * Idle MCU while waiting for interrupts; enables interrupts, so can
@@ -637,76 +819,6 @@ SIGNAL(SIG_PIN_CHANGE0) {
   button_change_intr(1, !(PINB & _BV(BUTTON2)));
 }
 
-// This will calculate leapyears, give it the year
-// and it will return 1 (true) or 0 (false)
-static uint8_t leapyear(uint16_t y) {
-  return ( (!(y % 4) && (y % 100)) || !(y % 400));
-}
-
-static uint8_t dotw(const struct date *date)
-{
-  uint16_t month, year;
-
-  month = date->m;
-  year = 2000 + date->y;
-  if (month < 3)  {
-    month += 12;
-    year -= 1;
-  }
-
-  return (date->d +
-	  (2 * month) +
-	  (6 * (month+1)/10) +
-	  year + (year/4) -
-	  (year/100) +
-	  (year/400) + 1) % 7;
-}
-
-static void increment_time(struct timedate *td)
-{
-  td->time.s++;             // one second has gone by
-
-  // a minute!
-  if (td->time.s >= 60) {
-    td->time.s = 0;
-    td->time.m++;
-  }
-
-  // an hour...
-  if (td->time.m >= 60) {
-    td->time.m = 0;
-    td->time.h++; 
-    // lets write the time to the EEPROM
-    eeprom_write_byte((uint8_t *)EE_HOUR, td->time.h);
-    eeprom_write_byte((uint8_t *)EE_MIN, td->time.m);
-  }
-
-  // a day....
-  if (td->time.h >= 24) {
-    td->time.h = 0;
-    td->date.d++;
-    eeprom_write_byte((uint8_t *)EE_DAY, td->date.d);
-  }
-
-  // a full month!
-  // we check the leapyear and date to verify when its time to roll over months
-  if ((td->date.d > 31) ||
-      ((td->date.d == 31) && ((td->date.m == 4)||(td->date.m == 6)||(td->date.m == 9)||(td->date.m == 11))) ||
-      ((td->date.d == 30) && (td->date.m == 2)) ||
-      ((td->date.d == 29) && (td->date.m == 2) && !leapyear(2000+td->date.y))) {
-    td->date.d = 1;
-    td->date.m++;
-    eeprom_write_byte((uint8_t *)EE_MONTH, td->date.m);
-  }
-  
-  // HAPPY NEW YEAR!
-  if (td->date.m >= 13) {
-    td->date.y++;
-    td->date.m = 1;
-    eeprom_write_byte((uint8_t *)EE_YEAR, td->date.y);
-  }
-}
-
 static void load_brite(void)
 {
   morning = eeprom_read_byte((unsigned char *)EE_MORNINGHR);
@@ -739,12 +851,14 @@ static uint8_t get_brite(void)
   uint8_t b;
 
   if (alarming)
-    b = (timedate.time.s % 2) ? BRITE_MIN : BRITE_MAX;
+    b = (epochtime % 2) ? BRITE_MIN : BRITE_MAX;
   else {
-    uint8_t hour = timedate.time.h;
+    struct time t;
+
+    get_timeofday(time(), &t);
 
     b = nightbrite;
-    if (hour >= morning && hour < evening)
+    if (t.h >= morning && t.h < evening)
       b = daybrite;
   }
 
@@ -766,34 +880,47 @@ static void set_brite(void)
  * interrupted.
  */
 SIGNAL (TIMER2_COMPA_vect) {
-  struct timedate td;
+  uint8_t on_hour = 0;
+  uint8_t on_min = 0;
   CLKPR = _BV(CLKPCE);  //MEME
   CLKPR = 0;
 
-  td = timedate;
-
   if (!suspend_update) {
-    increment_time(&td);
+    epochtime++;
+
+    on_min = (epochtime % 60) == 0;
+
+    if (on_min) {
+      on_hour = (epochtime % 3600) == 0;
+      eeprom_save_time();
+
+      if ((epochtime % SECS_PER_DAY) == 0)
+	eeprom_save_date();
+    }
 
     /* Apply drift correction on the first second of each hour */
-    if (td.time.m == 0 && td.time.s == 0)
+    if (on_hour)
       OCR2A = 128 + drift;
     else
       OCR2A = 128;
-
-    timedate = td;
   }
 
   // If we're in low power mode we should get out now since the display is off
   if (sleepmode)
     return;
-   
-  if (alarm_on && (alarm_days & (1 << dotw(&td.date))) &&
-      (alarm.h == td.time.h) &&
-      (alarm.m == td.time.m) && (td.time.s == 0)) {
-    DEBUGP("alarm on!");
-    alarming = 1;
-    snoozetimer = 0;
+  
+  if (on_min && alarm_on) {
+    struct time t;
+    
+    get_timeofday(epochtime, &t);
+
+    if (alarm_days & (1 << dotw(epochtime)) &&
+	(alarm.h == t.h) &&
+	(alarm.m == t.m)) {
+      DEBUGP("alarm on!");
+      alarming = 1;
+      snoozetimer = 0;
+    }
   }
 
   /* set brightness according to alarm state and time */
@@ -825,10 +952,8 @@ SIGNAL(SIG_COMPARATOR) {
       VFDCLK_PORT &= ~_BV(VFDCLK) & ~_BV(VFDDATA); // no power to vfdchip
       BOOST_PORT &= ~_BV(BOOST); // pull boost fet low
       SPCR  &= ~_BV(SPE); // turn off spi
-      if (restored) {
-	eeprom_write_byte((uint8_t *)EE_MIN, timedate.time.m);
-	eeprom_write_byte((uint8_t *)EE_SEC, timedate.time.s);
-      }
+      if (restored)
+	eeprom_save_time();
       DEBUGP("z");
       TCCR0B = 0; // no boost
       volume = 0; // low power buzzer
@@ -839,10 +964,8 @@ SIGNAL(SIG_COMPARATOR) {
   } else {
     //DEBUGP("LOW");
     if (sleepmode) {
-      if (restored) {
-	eeprom_write_byte((uint8_t *)EE_MIN, timedate.time.m);
-	eeprom_write_byte((uint8_t *)EE_SEC, timedate.time.s);
-      }
+      if (restored)
+	eeprom_save_time();
       DEBUGP("WAKERESET"); 
       app_start();
     }
@@ -991,53 +1114,11 @@ static void update_days(unsigned char *v)
   }
 }
 
-static const char *dayofweek(const struct date *date)
-{
-#define DOW(dow)	static const char dow[] PROGMEM = #dow
-  DOW(sunday);
-  DOW(monday);
-  DOW(tuesday);
-  DOW(wednsday);
-  DOW(thursday);
-  DOW(friday);
-  DOW(saturday);
-#undef DOW
-  static const char *days[] = {
-    sunday, monday, tuesday, wednsday, thursday, friday, saturday
-  };
-
-  return days[dotw(date)];
-}
-
 static unsigned char show_dayofweek(unsigned char pos, unsigned char *v)
 {
   const struct date *date = (const struct date *)v;
 
   return show_str(pos, (unsigned char *)dayofweek(date));
-}
-
-static const char *monthname(uint8_t month)
-{
-#define MON(m)	static const char m[] PROGMEM = #m
-  MON(jan);
-  MON(feb);
-  MON(march);
-  MON(april);
-  MON(may);
-  MON(june);
-  MON(july);
-  MON(augst);
-  MON(sept);
-  MON(octob);
-  MON(novem);
-  MON(decem);
-#undef MON
-  static const char *months[] = {
-    jan, feb, march, april, may, june,
-    july, augst, sept, octob, novem, decem
-  };
-
-  return months[month-1];
 }
 
 static unsigned char show_monthname(unsigned char pos, unsigned char *v)
@@ -1148,6 +1229,7 @@ static void update_secmode(unsigned char *v)
 
 static struct menu_state {
   union {
+    time_t epochtime;
     struct time time;
     struct date date;
     unsigned char val;
@@ -1175,45 +1257,45 @@ static const struct field alarmdays_fields[] PROGMEM = {
 };
 
 static const struct field time_fields[] PROGMEM = {
-  { show_hour, update_hour, &timedate.time.h },
-  { show_separator, NULL, &timedate.time.s },
-  { show_num, update_mod60, &timedate.time.m },
+  { show_hour, update_hour, &menu_state.time.h },
+  { show_separator, NULL, &menu_state.time.s },
+  { show_num, update_mod60, &menu_state.time.m },
   SPACE,
-  { show_second, NULL, (unsigned char *)&timedate.time },
+  { show_second, NULL, (unsigned char *)&menu_state.time },
 };
 
 static const struct field timeset_fields[] PROGMEM = {
-  { show_hour, update_hour, &timedate.time.h },
+  { show_hour, update_hour, &menu_state.time.h },
   SPACE,
-  { show_num, update_mod60, &timedate.time.m },
+  { show_num, update_mod60, &menu_state.time.m },
   SPACE,
-  { show_num, update_mod60, &timedate.time.s },
+  { show_num, update_mod60, &menu_state.time.s },
 };
 
 static const struct field us_date_fields[] PROGMEM = {
-  { show_num, update_month, &timedate.date.m },
+  { show_num, update_month, &menu_state.date.m },
   DASH,
-  { show_num_slz, update_day, &timedate.date.d },
+  { show_num_slz, update_day, &menu_state.date.d },
   DASH,
-  { show_num, update_year, &timedate.date.y },
+  { show_num, update_year, &menu_state.date.y },
 };
 
 static const struct field euro_date_fields[] PROGMEM = {
-  { show_num_slz, update_day, &timedate.date.d },
+  { show_num_slz, update_day, &menu_state.date.d },
   DASH,
-  { show_num, update_month, &timedate.date.m },
+  { show_num, update_month, &menu_state.date.m },
   DASH,
-  { show_num, update_year, &timedate.date.y },
+  { show_num, update_year, &menu_state.date.y },
 };
 
 static const struct field dotw_fields[] PROGMEM = {
-  { show_dayofweek, NULL, (unsigned char *)&timedate.date },
+  { show_dayofweek, NULL, (unsigned char *)&menu_state.date },
 };
 
 static const struct field monthdate_fields[] PROGMEM = {
-  { show_monthname, NULL, &timedate.date.m },
+  { show_monthname, NULL, &menu_state.date.m },
   SPACE,
-  { show_num_slz, NULL, &timedate.date.d },
+  { show_num_slz, NULL, &menu_state.date.d },
 };
 
 static void update_morning(unsigned char *v)
@@ -1320,16 +1402,20 @@ static void get_alarmdays(void)
 static void get_time(void)
 {
   suspend_update = 1;
-  copy_fields(timeset_fields, NELEM(timeset_fields));
   barrier();
+  copy_fields(timeset_fields, NELEM(timeset_fields));
+  get_timeofday(epochtime, &menu_state.time);
 }
 
 static void store_time(void)
 {
+  struct date d;
   timeunknown = 0;
 
-  eeprom_write_byte((uint8_t *)EE_HOUR, timedate.time.h);
-  eeprom_write_byte((uint8_t *)EE_MIN, timedate.time.m);
+  get_caldate(epochtime, &d);
+  epochtime = make_epochtime(&d, &menu_state.time);
+
+  eeprom_save_time();
 
   suspend_update = 0;
 
@@ -1343,13 +1429,20 @@ static void get_date(void)
   } else {
     copy_fields(euro_date_fields, NELEM(euro_date_fields));
   }
+
+  get_caldate(time(), &menu_state.date);
 }
 
 static void store_date(void)
 {
-  eeprom_write_byte((uint8_t *)EE_DAY, timedate.date.d);    
-  eeprom_write_byte((uint8_t *)EE_MONTH, timedate.date.m);    
-  eeprom_write_byte((uint8_t *)EE_YEAR, timedate.date.y);    
+  struct time t;
+
+  cli();
+  get_timeofday(epochtime, &t);
+  epochtime = make_epochtime(&menu_state.date, &t);
+  sei();
+
+  eeprom_save_date();
 }
 
 static void get_day(void)
@@ -1553,6 +1646,7 @@ out:
 // This displays a time on the clock
 static void display_time(transition_t *trans)
 {
+  get_timeofday(epochtime, &menu_state.time);
   copy_fields(time_fields, NELEM(time_fields));
   display_entry(-1, trans);
 }
@@ -1574,9 +1668,12 @@ static void display_date(uint8_t style)
     break;
 
   case DAY:
+    get_caldate(time(), &menu_state.date);
     copy_fields(dotw_fields, NELEM(dotw_fields));
     display_entry(-1, scroll_up);
+
     delayms(1000);
+
     copy_fields(monthdate_fields, NELEM(monthdate_fields));
     display_entry(-1, scroll_left);
     break;
@@ -1593,26 +1690,12 @@ static void clock_init(uint8_t inittimer) {
 
   // we store the time in EEPROM when switching from power modes so its
   // reasonable to start with whats in memory
-  timedate.time.h = eeprom_read_byte((uint8_t *)EE_HOUR) % 24;
-  timedate.time.m = eeprom_read_byte((uint8_t *)EE_MIN) % 60;
-  timedate.time.s = eeprom_read_byte((uint8_t *)EE_SEC) % 60;
-
-  /*
-    // if you're debugging, having the makefile set the right
-    // time automatically will be very handy. Otherwise don't use this
-  time_h = TIMEHOUR;
-  time_m = TIMEMIN;
-  time_s = TIMESEC + 10;
-  */
+  eeprom_restore_timedate();
 
   // Set up the stored alarm time and date
   alarm.m = eeprom_read_byte((uint8_t *)EE_ALARM_MIN) % 60;
   alarm.h = eeprom_read_byte((uint8_t *)EE_ALARM_HOUR) % 24;
   alarm_days = eeprom_read_byte((uint8_t *)EE_ALARM_DAYS);
-
-  timedate.date.y = eeprom_read_byte((uint8_t *)EE_YEAR) % 100;
-  timedate.date.m = eeprom_read_byte((uint8_t *)EE_MONTH) % 13;
-  timedate.date.d = eeprom_read_byte((uint8_t *)EE_DAY) % 32;
 
   restored = 1;
 
@@ -1769,7 +1852,7 @@ static transition_t *ui(transition_t *trans)
   if (setalarmstate())
     trans = scroll_up;
 
-  if (timeunknown && (timedate.time.s % 2))
+  if (timeunknown && (epochtime % 2))
     display_str("        ");
   else {
     if (alarm_on)
