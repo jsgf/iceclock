@@ -1585,7 +1585,7 @@ static void display_date(uint8_t style)
 
 /**************************** RTC & ALARM *****************************/
 static void clock_init(uint8_t inittimer) {
-  drift = eeprom_read_byte((uint8_t *)EE_HOUR);
+  drift = eeprom_read_byte((uint8_t *)EE_DRIFT);
   if (drift > DRIFT_MAX || drift < -DRIFT_MIN) {
     drift = 0;
     eeprom_write_byte((uint8_t *)EE_DRIFT, drift);
