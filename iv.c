@@ -1979,6 +1979,15 @@ static unsigned char __display_str(uint8_t *disp, const char *s)
       *disp =  pgm_read_byte(alphatable + c - 'a');
     } else if ((c >= '0') && (c <= '9')) {
       *disp =  pgm_read_byte(numbertable + c - '0');
+    } else if (c == '-') {
+      *disp = 1<<D0G;
+    } else if (c == '.') {
+      if (disp > display) {
+	/* If possible, add '.' to previous character */
+	disp--;
+	len--;
+      }
+      *disp = 1<<D0H;
     } else {
       *disp = 0;      // spaces and other stuff are ignored :(
     }
