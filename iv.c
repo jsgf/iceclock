@@ -883,6 +883,9 @@ struct entry {
   void (*store)(void);
 };
 
+static unsigned char space_P[] PROGMEM = " ";
+static unsigned char dash_P[] PROGMEM = "-";
+
 static unsigned char show_num(unsigned char pos, unsigned char *v)
 {
   emit_number(&display[pos], *v);
@@ -929,6 +932,16 @@ static unsigned char show_ampm(unsigned char pos, unsigned char *v)
     return show_str(pos, (unsigned char *)PSTR("am"));
 }
 
+static uint8_t show_separator(uint8_t pos, uint8_t *v)
+{
+  unsigned char *str = space_P;
+
+  if (secondmode != SEC_DIAL && (*v & 1))
+    str = dash_P;
+
+  return show_str(pos, str);
+}
+
 static unsigned char show_second(unsigned char pos, unsigned char *v)
 {
   struct time *t = (struct time *)v;
@@ -950,8 +963,7 @@ static unsigned char show_second(unsigned char pos, unsigned char *v)
     /* FALLTHROUGH */
 
   case SEC_NONE:
-    display[pos] = (s & 1);
-    return 1;
+    return 0;
   }
 }
 
@@ -1145,9 +1157,6 @@ static struct menu_state {
   struct field fields[5];
 } menu_state;
 
-static unsigned char space_P[] PROGMEM = " ";
-static unsigned char dash_P[] PROGMEM = "-";
-
 #define SPACE	  { show_str, NULL, space_P }
 #define DASH	  { show_str, NULL, dash_P }
 
@@ -1167,7 +1176,7 @@ static const struct field alarmdays_fields[] PROGMEM = {
 
 static const struct field time_fields[] PROGMEM = {
   { show_hour, update_hour, &timedate.time.h },
-  SPACE,
+  { show_separator, NULL, &timedate.time.s },
   { show_num, update_mod60, &timedate.time.m },
   SPACE,
   { show_second, NULL, (unsigned char *)&timedate.time },
