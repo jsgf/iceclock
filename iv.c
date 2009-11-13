@@ -539,7 +539,7 @@ static uint8_t scroll_left(uint8_t *statep)
     output_display[0] = display[0];
   else { 
     memmove(output_display+1, output_display+2, DISPLAYSIZE-2);
-    if (s < DISPLAYSIZE)
+    if (s < DISPLAYSIZE+1)
       output_display[DISPLAYSIZE-1] = 0;
     else
       output_display[DISPLAYSIZE-1] = display[s-DISPLAYSIZE];    
