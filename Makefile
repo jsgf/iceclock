@@ -264,7 +264,8 @@ extcoff: $(TARGET).elf
 	$(COFFCONVERT) -O coff-ext-avr $< $(TARGET).cof
 
 
-
+release: iv.elf iv.hex iv.lss
+	./mkrelease $^
 
 # Program the device.  
 program: $(TARGET).hex $(TARGET).eep

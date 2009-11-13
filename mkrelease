@@ -1,0 +1,19 @@
+#!/bin/bash
+
+existing=$(git tag -l --contains HEAD release-*)
+
+if [ -z "$existing" ]; then
+    count=0
+    base=$(date +release-%y%m%d)
+    tag=$base
+    while ! git tag "$tag" 2> /dev/null; do
+   	count=$(($count + 1))
+	tag="$base.$count"
+    done
+    echo "new release $tag"
+else
+    tag="$existing"
+    echo "updating release $tag"
+fi
+
+[ -n "$*" ] && zip iv-$tag.zip "$@"
