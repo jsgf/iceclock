@@ -7,3 +7,7 @@
 *.lst
 *.lss
 *.sym
+*.png
+*.pdf
+*~
+*.zip
