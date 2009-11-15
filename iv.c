@@ -39,6 +39,7 @@ static uint8_t region = REGION_US;
 static uint8_t secondmode = SEC_FULL;
 
 /* Drift correction applied each hour */
+#define DRIFT_BASELINE	127
 static int8_t drift = 0;
 
 /*
@@ -776,10 +777,18 @@ SIGNAL (TIMER2_COMPA_vect) {
     increment_time(&td);
 
     /* Apply drift correction on the first second of each hour */
-    if (td.time.m == 0 && td.time.s == 0)
-      OCR2A = 128 + drift;
-    else
-      OCR2A = 128;
+    if (td.time.m == 0) {
+      if (td.time.s == 0)
+	OCR2A = DRIFT_BASELINE + drift;
+      else if (td.time.s == 1)
+	OCR2A = DRIFT_BASELINE;
+
+      if (td.time.s <= 1) {
+	/* wait for update to take effect */
+	while (ASSR & _BV(OCR2AUB))
+	  ;
+      }
+    }
 
     timedate = td;
   }
@@ -1331,6 +1340,7 @@ static void store_time(void)
   eeprom_write_byte((uint8_t *)EE_HOUR, timedate.time.h);
   eeprom_write_byte((uint8_t *)EE_MIN, timedate.time.m);
 
+  TCNT2 = 0;
   suspend_update = 0;
 
   set_brite();
@@ -1625,20 +1635,20 @@ static void clock_init(uint8_t inittimer) {
      * Input is a (nominal) 32khz crystal.  Set:
      * - divider to 256
      * - mode to CTC
-     * - comparitor to 128
+     * - comparitor to 127
      *
      * This will increment the counter at (nominally) 128Hz.  When it
      * compares to OCR2A it will reset the counter to 0 and raise an
      * interrupt so we can increment seconds.
      *
-     * To correct drift we can adjust the comparitor to 128 +/-
+     * To correct drift we can adjust the comparitor to 127 +/-
      * correction.
      */
     // Turn on the RTC by selecting the external 32khz crystal
-    ASSR |= _BV(AS2); // use crystal
+    ASSR = _BV(AS2); // use crystal
 
     TCNT2 = 0;
-    OCR2A = 128;			/* +/- drift correction */
+    OCR2A = DRIFT_BASELINE;		/* +/- drift correction */
     TCCR2A = _BV(WGM21);
     TCCR2B = _BV(WGM22) | _BV(CS22) | _BV(CS21);
 
