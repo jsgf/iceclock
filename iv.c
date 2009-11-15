@@ -1650,7 +1650,7 @@ static void clock_init(uint8_t inittimer) {
     TCNT2 = 0;
     OCR2A = DRIFT_BASELINE;		/* +/- drift correction */
     TCCR2A = _BV(WGM21);
-    TCCR2B = _BV(WGM22) | _BV(CS22) | _BV(CS21);
+    TCCR2B = _BV(CS22) | _BV(CS21);
 
     // enable interrupt
     TIMSK2 = _BV(OCIE1A);
