@@ -1594,7 +1594,8 @@ static void display_date(uint8_t style)
 }
 
 /**************************** RTC & ALARM *****************************/
-static void clock_init(uint8_t inittimer) {
+static void clock_init(void)
+{
   drift = eeprom_read_byte((uint8_t *)EE_DRIFT);
   if (drift > DRIFT_MAX || drift < -DRIFT_MIN) {
     drift = 0;
@@ -1608,8 +1609,8 @@ static void clock_init(uint8_t inittimer) {
   timedate.time.s = eeprom_read_byte((uint8_t *)EE_SEC) % 60;
 
   /*
-    // if you're debugging, having the makefile set the right
-    // time automatically will be very handy. Otherwise don't use this
+  // if you're debugging, having the makefile set the right
+  // time automatically will be very handy. Otherwise don't use this
   time_h = TIMEHOUR;
   time_m = TIMEMIN;
   time_s = TIMESEC + 10;
@@ -1626,35 +1627,29 @@ static void clock_init(uint8_t inittimer) {
 
   restored = 1;
 
-  /*
-   * Only init timer if necessary (real hardware reset) otherwise we
-   * may glitch a second.
+  /* 
+   * Input is a (nominal) 32khz crystal.  Set:
+   * - divider to 256
+   * - mode to CTC
+   * - comparitor to 127
+   *
+   * This will increment the counter at (nominally) 128Hz.  When it
+   * compares to OCR2A it will reset the counter to 0 and raise an
+   * interrupt so we can increment seconds.
+   *
+   * To correct drift we can adjust the comparitor to 127 +/-
+   * correction.
    */
-  if (inittimer) {
-    /* 
-     * Input is a (nominal) 32khz crystal.  Set:
-     * - divider to 256
-     * - mode to CTC
-     * - comparitor to 127
-     *
-     * This will increment the counter at (nominally) 128Hz.  When it
-     * compares to OCR2A it will reset the counter to 0 and raise an
-     * interrupt so we can increment seconds.
-     *
-     * To correct drift we can adjust the comparitor to 127 +/-
-     * correction.
-     */
-    // Turn on the RTC by selecting the external 32khz crystal
-    ASSR = _BV(AS2); // use crystal
+  // Turn on the RTC by selecting the external 32khz crystal
+  ASSR = _BV(AS2); // use crystal
 
-    TCNT2 = 0;
-    OCR2A = DRIFT_BASELINE;		/* +/- drift correction */
-    TCCR2A = _BV(WGM21);
-    TCCR2B = _BV(CS22) | _BV(CS21);
+  TCNT2 = 0;
+  OCR2A = DRIFT_BASELINE;		/* +/- drift correction */
+  TCCR2A = _BV(WGM21);
+  TCCR2B = _BV(CS22) | _BV(CS21);
 
-    // enable interrupt
-    TIMSK2 = _BV(OCIE1A);
-  }
+  // enable interrupt
+  TIMSK2 = _BV(OCIE1A);
 
   // enable all interrupts!
   sei();
@@ -1906,7 +1901,7 @@ int main(void) {
   SMCR = _BV(SE); // idle mode
   
   DEBUGP("clock init");
-  clock_init(timeunknown);
+  clock_init();
     
   DEBUGP("done");
   trans = flip;
