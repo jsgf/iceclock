@@ -881,9 +881,12 @@ static void emit_number_slz(uint8_t *disp, uint8_t num)
 }
 
 struct field {
-  unsigned char (*display)(unsigned char pos, unsigned char *val);
+  unsigned char (*display)(unsigned char pos, const unsigned char *val);
   void (*update)(unsigned char *val);
-  unsigned char *val;
+  union {
+    const unsigned char *str;
+    unsigned char *val;
+  };
 };
 
 struct entry {
@@ -892,22 +895,22 @@ struct entry {
   void (*store)(void);
 };
 
-static unsigned char space_P[] PROGMEM = " ";
-static unsigned char dash_P[] PROGMEM = "-";
+static const unsigned char space_P[] PROGMEM = " ";
+static const unsigned char dash_P[] PROGMEM = "-";
 
-static unsigned char show_num(unsigned char pos, unsigned char *v)
+static unsigned char show_num(unsigned char pos, const unsigned char *v)
 {
   emit_number(&display[pos], *v);
   return 2;
 }
 
-static unsigned char show_num_slz(unsigned char pos, unsigned char *v)
+static unsigned char show_num_slz(unsigned char pos, const unsigned char *v)
 {
   emit_number_slz(&display[pos], *v);
   return 2;
 }
 
-static unsigned char show_hour(unsigned char pos, unsigned char *v)
+static unsigned char show_hour(unsigned char pos, const unsigned char *v)
 {
   uint8_t h = *v;
 
@@ -922,28 +925,28 @@ static unsigned char show_hour(unsigned char pos, unsigned char *v)
   return 2;
 }
 
-static unsigned char show_str(unsigned char pos, unsigned char *v)
+static unsigned char show_str(unsigned char pos, const unsigned char *v)
 {
   char str[DISPLAYSIZE + 1];
 
-  strcpy_P(str, (char *)v);
+  strcpy_P(str, (const char *)v);
   return __display_str(display+pos, str);
 }
 
-static unsigned char show_ampm(unsigned char pos, unsigned char *v)
+static unsigned char show_ampm(unsigned char pos, const unsigned char *v)
 {
   if (region != REGION_US)
     return 0;
 
   if (*v >= 12)
-    return show_str(pos, (unsigned char *)PSTR("pm"));
+    return show_str(pos, (const unsigned char *)PSTR("pm"));
   else
-    return show_str(pos, (unsigned char *)PSTR("am"));
+    return show_str(pos, (const unsigned char *)PSTR("am"));
 }
 
-static uint8_t show_separator(uint8_t pos, uint8_t *v)
+static uint8_t show_separator(uint8_t pos, const uint8_t *v)
 {
-  unsigned char *str = space_P;
+  const unsigned char *str = space_P;
 
   if (secondmode != SEC_DIAL && (*v & 1))
     str = dash_P;
@@ -951,7 +954,7 @@ static uint8_t show_separator(uint8_t pos, uint8_t *v)
   return show_str(pos, str);
 }
 
-static unsigned char show_second(unsigned char pos, unsigned char *v)
+static unsigned char show_second(unsigned char pos, const unsigned char *v)
 {
   struct time *t = (struct time *)v;
   unsigned char s = t->s;
@@ -976,7 +979,7 @@ static unsigned char show_second(unsigned char pos, unsigned char *v)
   }
 }
 
-static unsigned char show_days(unsigned char pos, unsigned char *v)
+static unsigned char show_days(unsigned char pos, const unsigned char *v)
 {
   static const char *str;
 
@@ -1018,7 +1021,7 @@ static const char *dayofweek(const struct date *date)
   return days[dotw(date)];
 }
 
-static unsigned char show_dayofweek(unsigned char pos, unsigned char *v)
+static unsigned char show_dayofweek(unsigned char pos, const unsigned char *v)
 {
   const struct date *date = (const struct date *)v;
 
@@ -1049,7 +1052,7 @@ static const char *monthname(uint8_t month)
   return months[month-1];
 }
 
-static unsigned char show_monthname(unsigned char pos, unsigned char *v)
+static unsigned char show_monthname(unsigned char pos, const unsigned char *v)
 {
   return show_str(pos, (unsigned char *)monthname(*v));
 }
@@ -1105,7 +1108,7 @@ static void update_brite(unsigned char *v)
   *v = new;
 }
 
-static unsigned char show_vol(unsigned char pos, unsigned char *v)
+static unsigned char show_vol(unsigned char pos, const unsigned char *v)
 {
   if (*v)
     return show_str(pos, (unsigned char *)PSTR("high"));
@@ -1125,7 +1128,7 @@ static void update_vol(unsigned char *v)
   beep(4000, 1);
 }
 
-static unsigned char show_region(unsigned char pos, unsigned char *v)
+static unsigned char show_region(unsigned char pos, const unsigned char *v)
 {
   const char *ret;
   if (*v == REGION_US)
@@ -1135,7 +1138,7 @@ static unsigned char show_region(unsigned char pos, unsigned char *v)
   return show_str(pos, (unsigned char *)ret);
 }
 
-static unsigned char show_secmode(unsigned char pos, unsigned char *v)
+static unsigned char show_secmode(unsigned char pos, const unsigned char *v)
 {
   const char *ret;
 
@@ -1166,63 +1169,63 @@ static struct menu_state {
   struct field fields[5];
 } menu_state;
 
-#define SPACE	  { show_str, NULL, space_P }
-#define DASH	  { show_str, NULL, dash_P }
+#define SPACE	  { show_str, NULL, .str = space_P }
+#define DASH	  { show_str, NULL, .str = dash_P }
 
 static const struct field alarm_fields[] PROGMEM = {
-  { show_hour, update_hour, &alarm.h },
+  { show_hour, update_hour, .val = &alarm.h },
   DASH,
-  { show_num, update_mod60, &alarm.m },
+  { show_num, update_mod60, .val = &alarm.m },
   SPACE,
-  { show_ampm, NULL, &alarm.h },
+  { show_ampm, NULL, .val = &alarm.h },
 };
 
-unsigned char days_P[] PROGMEM = "days";
+static const unsigned char days_P[] PROGMEM = "days";
 static const struct field alarmdays_fields[] PROGMEM = {
-  { show_days, update_days, &alarm_days },
-  { show_str, NULL, days_P },
+  { show_days, update_days, .val = &alarm_days },
+  { show_str, NULL, .str = days_P },
 };
 
 static const struct field time_fields[] PROGMEM = {
-  { show_hour, update_hour, &timedate.time.h },
-  { show_separator, NULL, &timedate.time.s },
-  { show_num, update_mod60, &timedate.time.m },
+  { show_hour, update_hour, .val = &timedate.time.h },
+  { show_separator, NULL, .val = &timedate.time.s },
+  { show_num, update_mod60, .val = &timedate.time.m },
   SPACE,
-  { show_second, NULL, (unsigned char *)&timedate.time },
+  { show_second, NULL, .val = (unsigned char *)&timedate.time },
 };
 
 static const struct field timeset_fields[] PROGMEM = {
-  { show_hour, update_hour, &timedate.time.h },
+  { show_hour, update_hour, .val = &timedate.time.h },
   SPACE,
-  { show_num, update_mod60, &timedate.time.m },
+  { show_num, update_mod60, .val = &timedate.time.m },
   SPACE,
-  { show_num, update_mod60, &timedate.time.s },
+  { show_num, update_mod60, .val = &timedate.time.s },
 };
 
 static const struct field us_date_fields[] PROGMEM = {
-  { show_num, update_month, &timedate.date.m },
+  { show_num, update_month, .val = &timedate.date.m },
   DASH,
-  { show_num_slz, update_day, &timedate.date.d },
+  { show_num_slz, update_day, .val = &timedate.date.d },
   DASH,
-  { show_num, update_year, &timedate.date.y },
+  { show_num, update_year, .val = &timedate.date.y },
 };
 
 static const struct field euro_date_fields[] PROGMEM = {
-  { show_num_slz, update_day, &timedate.date.d },
+  { show_num_slz, update_day, .val = &timedate.date.d },
   DASH,
-  { show_num, update_month, &timedate.date.m },
+  { show_num, update_month, .val = &timedate.date.m },
   DASH,
-  { show_num, update_year, &timedate.date.y },
+  { show_num, update_year, .val = &timedate.date.y },
 };
 
 static const struct field dotw_fields[] PROGMEM = {
-  { show_dayofweek, NULL, (unsigned char *)&timedate.date },
+  { show_dayofweek, NULL, .val = (unsigned char *)&timedate.date },
 };
 
 static const struct field monthdate_fields[] PROGMEM = {
-  { show_monthname, NULL, &timedate.date.m },
+  { show_monthname, NULL, .str = &timedate.date.m },
   SPACE,
-  { show_num_slz, NULL, &timedate.date.d },
+  { show_num_slz, NULL, .str = &timedate.date.d },
 };
 
 static void update_morning(unsigned char *v)
@@ -1231,12 +1234,12 @@ static void update_morning(unsigned char *v)
     *v = 0;
 }
 
-unsigned char day_P[] PROGMEM = "dy ";
+static const unsigned char day_P[] PROGMEM = "dy ";
 static const struct field day_fields[] PROGMEM = {
-  { show_str, NULL, day_P },
-  { show_hour, update_morning, &morning },
+  { show_str, NULL, .str = day_P },
+  { show_hour, update_morning, .val = &morning },
   SPACE,
-  { show_num, update_brite, &daybrite },
+  { show_num, update_brite, .val = &daybrite },
 };
 
 static void update_evening(unsigned char *v)
@@ -1245,37 +1248,37 @@ static void update_evening(unsigned char *v)
     *v = 12;
 }
 
-static unsigned char night_P[] PROGMEM = "nt ";
+static const unsigned char night_P[] PROGMEM = "nt ";
 static const struct field night_fields[] PROGMEM = {
-  { show_str, NULL, night_P },
-  { show_hour, update_evening, &evening },
+  { show_str, NULL, .str = night_P },
+  { show_hour, update_evening, .val = &evening },
   SPACE,
-  { show_num, update_brite, &nightbrite },
+  { show_num, update_brite, .val = &nightbrite },
 };
 
-static unsigned char vol_P[] PROGMEM = "vol ";
+static const unsigned char vol_P[] PROGMEM = "vol ";
 static const struct field vol_fields[] PROGMEM = {
-  { show_str, NULL, vol_P },
-  { show_vol, update_vol, &volume },
+  { show_str, NULL, .str = vol_P },
+  { show_vol, update_vol, .val = &volume },
 };
 
 static const struct field region_fields[] PROGMEM = {
-  { show_region, update_toggle, &region },
+  { show_region, update_toggle, .val = &region },
 };
 
-static unsigned char sec_P[] PROGMEM = "sec ";
+static const unsigned char sec_P[] PROGMEM = "sec ";
 static const struct field secmode_fields[] PROGMEM = {
-  { show_str, NULL, sec_P },
-  { show_secmode, update_secmode, &secondmode },
+  { show_str, NULL, .str = sec_P },
+  { show_secmode, update_secmode, .val = &secondmode },
 };
 
-static unsigned char snoz_P[] PROGMEM = "snoz ";
+static const unsigned char snoz_P[] PROGMEM = "snoz ";
 static const struct field snooze_fields[] PROGMEM = {
-  { show_str, NULL, snoz_P },
-  { show_num_slz, update_mod60_s5, &snooze },
+  { show_str, NULL, .str = snoz_P },
+  { show_num_slz, update_mod60_s5, .val = &snooze },
 };
 
-static uint8_t show_drift(uint8_t pos, unsigned char *v)
+static uint8_t show_drift(uint8_t pos, const unsigned char *v)
 {
   int8_t d = *v;
   
@@ -1297,13 +1300,13 @@ static void update_drift(unsigned char *v)
   *v = d;
 }
 
-static unsigned char drift_P[] PROGMEM = "drft ";
+static const unsigned char drift_P[] PROGMEM = "drft ";
 static const struct field drift_fields[] PROGMEM = {
-  { show_str, NULL, drift_P },
-  { show_drift, update_drift, (unsigned char *)&drift },
+  { show_str, NULL, .str = drift_P },
+  { show_drift, update_drift, .val = (unsigned char *)&drift },
 };
 
-static void copy_fields(const struct field PROGMEM *fields, unsigned int nelem)
+static void copy_fields(const struct field *fields, unsigned int nelem)
 {
   memcpy_P(menu_state.fields, fields, nelem * sizeof(struct field));
   menu_state.nfields = nelem;
